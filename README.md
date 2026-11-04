@@ -9,11 +9,12 @@ keyboard.
 
 ## Features
 
-- **Live status on the 172×320 screen** — an animated Nyan Cat pet with
-  `IDLE` / `THINKING` / `TOOL` / `APPROVE` / `ERROR` states.
+- **Live status on the 172×320 screen** — a per-state pixel animation:
+  the sleeping cat (idle), the classic Nyan Cat (thinking), the cool cat
+  (approve) and the "nope" cat (reject).
 - **Physical approve / deny** — a pending tool approval appears on the device
   with big `YES` / `NO` buttons; a tap sends `allowed-once` or `rejected` back to
-  the Harness. If nobody taps within 15 s the request falls back to the normal
+  the Harness. If nobody taps within 6 s the request falls back to the normal
   GUI dialog.
 - **`buddy_show` tool** — the agent can draw a short message on the device.
 - **BLE HID keyboard** (`AgentBuddy`) — the board pairs as a wireless keyboard;
@@ -27,6 +28,7 @@ keyboard.
 ```
 Arduino/nyancat/            firmware
   nyancat.ino               display, states, touch, protocol
+  nyan_anims.h              RLE-packed per-state animations (idle/think/approve/reject)
   nyancat_frames.h          RLE-packed 12-frame Nyan Cat animation
   esp_lcd_touch_axs5106l.*  AXS5106L touch driver (I2C)
   ble_kb.*                  BLE HID keyboard backend
@@ -36,7 +38,6 @@ plugins/dsh-agent-buddy/    DeepSeek Harness plugin bundle
   client.js                 Client: status pill in the composer dock
   cordis.patch.yml          bundle patch + config
 refwork/sketches/           state design sketches
-refwork/anim/               thinking-cat animation variants
 ```
 
 ## Firmware
@@ -80,7 +81,7 @@ Config (`cordis.patch.yml`):
 | `port` | `/dev/cu.usbmodem1101` | board USB CDC |
 | `python` | `python3` | interpreter that has `pyserial` |
 | `approvals` | `on` | `on` answers on the device; `off` mirrors and delegates |
-| `timeoutMs` | `15000` | device window before delegating to the GUI |
+| `timeoutMs` | `6000` | device window before delegating to the GUI |
 
 ## Serial protocol (board ↔ bridge)
 
