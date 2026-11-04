@@ -1,0 +1,8 @@
+- insert:
+    - id: agent-buddy
+      name: '@local/dsh-agent-buddy'
+      config:
+        port: '/dev/cu.usbmodem1101'
+        python: 'python3'
+        approvals: 'on'
+        timeoutMs: 15000

@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Agent Buddy (ESP32 display)",
+    "description": "Mirrors the agent's live status to a Waveshare ESP32-S3-Touch-LCD-1.47 and lets you approve or reject tool calls with a touch button."
+  }
+}
