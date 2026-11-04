@@ -165,7 +165,7 @@ uint32_t periodForState(St s) {
   switch (s) {
     case ST_IDLE:     return 220;
     case ST_THINK:    return 110;
-    case ST_APPROVED: return 200;   // faster cool-cat loop
+    case ST_APPROVED: return 90;    // fast cool-cat loop
     default:          return 140;
   }
 }
