@@ -53,13 +53,16 @@ export function apply(ctx, config = {}) {
   const timeoutMs = Number(config.timeoutMs || 15000)
 
   let bridge = null
+  let deviceAlive = false    // true only after the board said "hello"
   let outBuf = ''
   const pending = new Map()
   let current = 'idle'
   let manualUntil = 0        // buddy_show owns the screen for a short while
+  let reactionUntil = 0      // approved/rejected animation owns the screen
 
   function send(obj) {
-    if (!bridge) startBridge()   // reattach after the port was released (e.g. flashing)
+    // Reattach when the bridge is missing or the process is already dead.
+    if (!bridge || bridge.killed || bridge.exitCode != null) startBridge()
     if (!bridge || !bridge.stdin || !bridge.stdin.writable) return false
     try {
       bridge.stdin.write(JSON.stringify(obj) + '\n')
@@ -76,7 +79,10 @@ export function apply(ctx, config = {}) {
   }
 
   function onEvent(evt) {
-    if (evt && evt.evt === 'approve' && evt.id != null) {
+    if (!evt) return
+    deviceAlive = true   // any line from the board proves the link is up
+    if (evt.evt === 'hello') return
+    if (evt.evt === 'approve' && evt.id != null) {
       const resolve = pending.get(String(evt.id))
       if (resolve) {
         pending.delete(String(evt.id))
@@ -86,16 +92,26 @@ export function apply(ctx, config = {}) {
   }
 
   function startBridge() {
+    // Never leave a previous process behind: two bridges split the serial stream.
     try {
-      bridge = spawn(python, [join(HERE, 'bridge.py'), '--port', port], {
+      bridge?.kill()
+    } catch {
+      /* ignore */
+    }
+    let child
+    try {
+      child = spawn(python, [join(HERE, 'bridge.py'), '--port', port], {
         stdio: ['pipe', 'pipe', 'ignore'],
       })
     } catch {
       bridge = null
+      deviceAlive = false
       return
     }
-    bridge.stdout.setEncoding('utf8')
-    bridge.stdout.on('data', (chunk) => {
+    bridge = child
+    deviceAlive = false
+    child.stdout.setEncoding('utf8')
+    child.stdout.on('data', (chunk) => {
       outBuf += chunk
       let i
       while ((i = outBuf.indexOf('\n')) >= 0) {
@@ -109,11 +125,17 @@ export function apply(ctx, config = {}) {
         }
       }
     })
-    bridge.on('exit', () => {
-      bridge = null
+    child.on('exit', () => {
+      if (bridge === child) {
+        bridge = null
+        deviceAlive = false
+      }
     })
-    bridge.on('error', () => {
-      bridge = null
+    child.on('error', () => {
+      if (bridge === child) {
+        bridge = null
+        deviceAlive = false
+      }
     })
   }
 
@@ -125,7 +147,7 @@ export function apply(ctx, config = {}) {
       res.setHeader('Cache-Control', 'no-store')
       if (req.url === '/status') {
         res.setHeader('Content-Type', 'application/json')
-        res.end(JSON.stringify({ state: current, connected: bridge != null }))
+        res.end(JSON.stringify({ state: current, connected: deviceAlive }))
       } else {
         res.statusCode = 404
         res.end('not found')
@@ -144,6 +166,7 @@ export function apply(ctx, config = {}) {
     const statusPoll = setInterval(() => {
       if (current === 'approve') return
       if (Date.now() < manualUntil) return
+      if (Date.now() < reactionUntil) return
       try {
         const list = ctx.agents?.list?.() ?? []
         const running = list.some((a) => a?.status === 'running')
@@ -190,7 +213,9 @@ export function apply(ctx, config = {}) {
         if (pending.delete(id)) resolve(null)
       }, timeoutMs)
     })
-    show('think')
+    // Let the device play its approved/rejected reaction before switching back.
+    if (outcome !== null) reactionUntil = Date.now() + 7500
+    setTimeout(() => show('think'), 7500)
     if (outcome === null) return next()      // no tap in time: let the GUI decide
     return outcome
   }
@@ -198,6 +223,7 @@ export function apply(ctx, config = {}) {
   function onAgentStatus(ev) {
     if (current === 'approve') return   // never cover a pending approval
     if (Date.now() < manualUntil) return
+    if (Date.now() < reactionUntil) return
     const s = ev?.status ?? ev
     if (s === 'idle') show('idle')
     else if (s === 'running') show('think')

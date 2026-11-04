@@ -12,10 +12,44 @@ stdout : one JSON object per line (events from the board)
 The board protocol is the small pipe format documented in nyancat.ino.
 """
 import argparse
+import atexit
 import json
+import os
 import sys
 import threading
 import time
+
+LOCK_PATH = "/tmp/nyan-buddy-bridge.lock"
+
+
+def acquire_lock():
+    """Only one bridge may read the serial port; extras exit immediately."""
+    try:
+        if os.path.exists(LOCK_PATH):
+            try:
+                pid = int(open(LOCK_PATH).read().strip() or 0)
+            except Exception:
+                pid = 0
+            if pid and pid != os.getpid():
+                try:
+                    os.kill(pid, 0)   # alive?
+                    return False
+                except OSError:
+                    pass              # stale lock file
+        open(LOCK_PATH, "w").write(str(os.getpid()))
+        return True
+    except Exception:
+        return True
+
+
+def release_lock():
+    try:
+        if os.path.exists(LOCK_PATH):
+            pid = int(open(LOCK_PATH).read().strip() or 0)
+            if pid == os.getpid():
+                os.remove(LOCK_PATH)
+    except Exception:
+        pass
 
 try:
     import serial
@@ -54,6 +88,11 @@ def main():
     ap.add_argument("--reconnect", action="store_true")
     args = ap.parse_args()
 
+    if not acquire_lock():
+        print(json.dumps({"evt": "error", "msg": "another bridge already owns the port"}), flush=True)
+        sys.exit(2)
+    atexit.register(release_lock)
+
     ser = None
     try:
         ser = serial.Serial(args.port, args.baud, timeout=0.2)
@@ -70,7 +109,9 @@ def main():
                 data = ser.read(256)
             except Exception as e:
                 print(json.dumps({"evt": "error", "msg": "read: %s" % e}), flush=True)
-                break
+                # The USB device re-enumerated (cable replug). Exit so the plugin
+                # spawns a fresh bridge with a valid handle.
+                os._exit(3)
             if not data:
                 continue
             buf += data
@@ -101,6 +142,7 @@ def main():
             ser.write(line.encode("utf-8"))
         except Exception as e:
             print(json.dumps({"evt": "error", "msg": "write: %s" % e}), flush=True)
+            os._exit(3)   # stale handle after replug: let the plugin respawn
 
     for raw in sys.stdin:
         raw = raw.strip()

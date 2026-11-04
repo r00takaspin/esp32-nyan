@@ -1,22 +1,17 @@
 // DSH Agent Buddy for Waveshare ESP32-S3-Touch-LCD-1.47
 // ------------------------------------------------------
 // The device is a desk-side "buddy" for the DeepSeek Harness:
-//   * shows what the agent is doing (idle / thinking / tool / error)
-//   * shows a pending tool approval with touch YES / NO buttons
-//   * speaks a tiny line protocol over USB CDC (115200):
-//       Host -> Dev:  S|idle
-//                     S|think
-//                     S|tool|<text>
-//                     S|approve|<id>|<text>
-//                     S|error|<text>
-//       Dev -> Host:  E|hello
-//                     E|approve|<id>|<1|0>
-//   * has a pluggable keyboard backend: raw key output goes through kbRaw(),
-//     which is a no-op here and gets a BLE HID / USB HID implementation later.
+//   * per-state cat animations (idle / thinking / approved / rejected)
+//   * a pending tool approval with big touch YES / NO buttons
+//   * a tiny line protocol over USB CDC (115200):
+//       Host -> Dev:  S|idle  S|think  S|tool|<text>  S|approve|<id>|<text>  S|error|<text>
+//       Dev -> Host:  E|hello  E|approve|<id>|<1|0>  A|<state>
+//   * a pluggable keyboard backend (BLE HID by default, USB HID with -DUSB_HID_KB).
 
 #include <Arduino_GFX_Library.h>
 #include <Wire.h>
 #include "esp_lcd_touch_axs5106l.h"
+#include "nyan_anims.h"
 #include "nyancat_frames.h"
 
 #if defined(USB_HID_KB)
@@ -42,7 +37,7 @@ Arduino_GFX *gfx = new Arduino_ST7789(
     172 /* width */, 320 /* height */,
     34 /* col_offset1 */, 0 /* row_offset1 */,
     34 /* col_offset2 */, 0 /* row_offset2 */);
-Arduino_Canvas *canvas = new Arduino_Canvas(FRAME_W, FRAME_H, gfx, 0, 0, 0);
+Arduino_Canvas *canvas = new Arduino_Canvas(ANIM_W, ANIM_H, gfx, 0, 0, 0);
 
 #define C565(r,g,b) ((((r)&0xF8)<<8) | (((g)&0xFC)<<3) | ((b)>>3))
 #define C_BLACK  C565(0, 0, 0)
@@ -52,21 +47,21 @@ Arduino_Canvas *canvas = new Arduino_Canvas(FRAME_W, FRAME_H, gfx, 0, 0, 0);
 #define C_AMBER  C565(255, 190, 40)
 #define C_CYAN   C565(80, 200, 255)
 #define C_PANEL  C565(18, 20, 34)
-#define C_DIM    C565(120, 140, 170)
 
-enum St { ST_IDLE, ST_THINK, ST_TOOL, ST_APPROVE, ST_ERROR };
+enum St { ST_IDLE, ST_THINK, ST_TOOL, ST_APPROVE, ST_ERROR, ST_APPROVED, ST_REJECTED };
 St st = ST_IDLE;
 char stateText[180] = "";
 char approveId[48] = "";
 
-int frameIdx = 0;
+int animIdx = 0;
 uint32_t lastFrame = 0;
+uint32_t reactionUntil = 0;
 bool dirty = true;
 uint32_t lastTouch = 0;
 
 touch_data_t td;
 
-// ---- keyboard backend: BLE HID by default, USB HID with -DUSB_HID_KB ----
+// ---- keyboard backend ----
 void kbRaw(uint8_t key) {
 #if defined(USB_HID_KB)
   usbKeyboard.write(key);
@@ -123,7 +118,24 @@ void lcd_reg_init(void) {
 }
 
 // ------------------------- rendering -------------------------
-void decodeFrame(int idx) {
+void drawWrapped(int x, int y, int maxW, const char *s, uint16_t col, int sz, int lh);
+
+void drawAnimFrame(int anim, int idx) {
+  uint16_t *fb = canvas->getFramebuffer();
+  if (!fb) return;
+  uint32_t p = ANIM_OFF[anim][idx];
+  uint32_t end = ANIM_OFF[anim][idx + 1];
+  int pos = 0;
+  while (p < end) {
+    uint8_t cnt = ANIM_RLE[p++];
+    uint8_t ix = ANIM_RLE[p++];
+    uint16_t col = ANIM_PAL[ix];
+    for (uint8_t k = 0; k < cnt; k++) fb[pos++] = col;
+  }
+}
+
+// Original 12-frame Nyan Cat, kept for the THINK / TOOL state.
+void drawNyanFrame(int idx) {
   uint16_t *fb = canvas->getFramebuffer();
   if (!fb) return;
   uint32_t p = NYAN_OFF[idx];
@@ -137,13 +149,82 @@ void decodeFrame(int idx) {
   }
 }
 
-void drawBadge(const char *label, uint16_t col) {
-  canvas->fillRect(0, 0, 320, 18, C_BLACK);
-  canvas->fillRect(4, 5, 8, 8, col);
-  canvas->setTextColor(col);
-  canvas->setTextSize(1);
-  canvas->setCursor(18, 5);
-  canvas->print(label);
+int animForState(St s) {
+  switch (s) {
+    case ST_IDLE:     return ANIM_IDLE;
+    case ST_THINK:
+    case ST_TOOL:     return ANIM_THINK;
+    case ST_APPROVED: return ANIM_APPROVE;
+    case ST_REJECTED:
+    case ST_ERROR:    return ANIM_REJECT;
+    default:          return ANIM_IDLE;
+  }
+}
+
+uint32_t periodForState(St s) {
+  switch (s) {
+    case ST_IDLE:     return 220;
+    case ST_THINK:    return 110;
+    case ST_APPROVED: return 200;   // faster cool-cat loop
+    default:          return 140;
+  }
+}
+
+// ---- sparse starfield drawn over the flat background of the new animations ----
+struct Star { int16_t x, y; uint8_t phase, type; };
+static const Star STARS[28] = {
+  {237,149,7,1},{266,156,3,0},{268,127,2,0},{234,83,2,0},{281,16,6,1},{86,165,0,2},
+  {38,21,0,0},{129,159,0,1},{173,118,3,2},{125,81,7,0},{49,123,4,1},{288,27,4,1},
+  {123,137,4,0},{41,150,1,1},{61,80,6,0},{14,6,3,0},{32,126,6,2},{209,113,1,2},
+  {107,75,5,0},{165,91,0,1},{66,40,3,2},{57,8,0,1},{255,51,3,1},{266,54,2,1},
+  {202,35,6,1},{114,6,4,2},{161,11,3,0},{207,160,1,0},
+};
+
+void drawStars(uint32_t f) {
+  uint16_t *fb = canvas->getFramebuffer();
+  if (!fb) return;
+  const uint16_t bg = ANIM_PAL[0];
+  // Only one star sparkles at a time, and it changes slowly: a rare twinkle.
+  int hot = (f / 12) % 28;
+  for (unsigned i = 0; i < sizeof(STARS) / sizeof(STARS[0]); i++) {
+    int x = STARS[i].x, y = STARS[i].y;
+    int idx = y * ANIM_W + x;
+    if (fb[idx] != bg) continue;               // never paint over the cat
+    uint16_t col = ((int)i == hot) ? C565(255, 255, 255) : C565(175, 200, 240);
+    fb[idx] = col;
+    if (STARS[i].type >= 1) {
+      if (x > 0 && fb[idx - 1] == bg) fb[idx - 1] = col;
+      if (x < ANIM_W - 1 && fb[idx + 1] == bg) fb[idx + 1] = col;
+      if (y > 0 && fb[idx - ANIM_W] == bg) fb[idx - ANIM_W] = col;
+      if (y < ANIM_H - 1 && fb[idx + ANIM_W] == bg) fb[idx + ANIM_W] = col;
+    }
+    if (STARS[i].type == 2) {
+      if (x < ANIM_W - 1 && fb[idx + 1] == bg) fb[idx + 1] = col;
+      if (y < ANIM_H - 1 && fb[idx + ANIM_W] == bg) fb[idx + ANIM_W] = col;
+    }
+  }
+}
+
+void drawScene() {
+  if (st == ST_THINK || st == ST_TOOL) {
+    drawNyanFrame(animIdx % NYAN_FRAMES);
+    animIdx = (animIdx + 1) % NYAN_FRAMES;
+  } else {
+    int anim = animForState(st);
+    int n = ANIM_COUNT[anim];
+    if (animIdx >= n) animIdx = 0;
+    drawAnimFrame(anim, animIdx);
+    drawStars(animIdx);
+    animIdx = (animIdx + 1) % n;
+  }
+
+  if (st == ST_TOOL) {
+    canvas->fillRect(0, 150, ANIM_W, 22, C_BLACK);
+    drawWrapped(6, 155, 308, stateText, C_AMBER, 1, 9);
+  } else if (st == ST_ERROR) {
+    canvas->fillRect(0, 150, ANIM_W, 22, C_BLACK);
+    drawWrapped(6, 155, 308, stateText, C_RED, 1, 9);
+  }
 }
 
 // word-wrapped text using the built-in 5x7 font
@@ -174,8 +255,6 @@ void drawApprove() {
   canvas->setCursor(6, 4);
   canvas->print("APPROVE TOOL CALL?");
   drawWrapped(6, 16, 308, stateText, C_WHITE, 1, 10);
-
-  // Big thumb-friendly buttons.
   canvas->fillRoundRect(6, 96, 152, 70, 12, C_GREEN);
   canvas->fillRoundRect(162, 96, 152, 70, 12, C_RED);
   canvas->setTextColor(C_BLACK);
@@ -184,29 +263,6 @@ void drawApprove() {
   canvas->print("YES");
   canvas->setCursor(220, 119);
   canvas->print("NO");
-}
-
-void drawError() {
-  canvas->fillScreen(C565(60, 0, 0));
-  canvas->setTextColor(C_WHITE);
-  canvas->setTextSize(2);
-  canvas->setCursor(10, 10);
-  canvas->print("ERROR");
-  drawWrapped(10, 44, 300, stateText, C_WHITE, 1, 12);
-}
-
-void drawPet() {
-  decodeFrame(frameIdx);
-  frameIdx = (frameIdx + 1) % NYAN_FRAMES;
-  if (st == ST_IDLE) {
-    drawBadge("IDLE", C_GREEN);
-  } else if (st == ST_THINK) {
-    drawBadge("THINKING", C_CYAN);
-  } else if (st == ST_TOOL) {
-    drawBadge("TOOL", C_AMBER);
-    canvas->fillRect(0, 150, 320, 22, C_BLACK);
-    drawWrapped(6, 155, 308, stateText, C_AMBER, 1, 9);
-  }
 }
 
 // ------------------------- protocol -------------------------
@@ -225,10 +281,15 @@ void applyState(St s, const char *text) {
   st = s;
   strncpy(stateText, text ? text : "", sizeof(stateText) - 1);
   stateText[sizeof(stateText) - 1] = 0;
+  animIdx = 0;
   dirty = true;
   lastFrame = 0;
+  if (s == ST_APPROVED) reactionUntil = millis() + 7200;
+  else if (s == ST_REJECTED) reactionUntil = millis() + 1600;
+
   const char *name = (s == ST_IDLE) ? "idle" : (s == ST_THINK) ? "think"
-                   : (s == ST_TOOL) ? "tool" : (s == ST_APPROVE) ? "approve" : "error";
+                   : (s == ST_TOOL) ? "tool" : (s == ST_APPROVE) ? "approve"
+                   : (s == ST_APPROVED) ? "approved" : (s == ST_REJECTED) ? "rejected" : "error";
   char a[28];
   snprintf(a, sizeof(a), "A|%s", name);
   sendLine(a);
@@ -245,10 +306,16 @@ void parseLine(const String &line) {
   }
   if (n < 2 || tok[0] != "S") return;
   String cmd = tok[1];
+  // Protect the approved/rejected reaction window from late status updates.
+  if ((st == ST_APPROVED || st == ST_REJECTED) && millis() < reactionUntil
+      && (cmd == "think" || cmd == "idle" || cmd == "tool")) return;
   if (cmd == "idle")       applyState(ST_IDLE, "");
   else if (cmd == "think") applyState(ST_THINK, "");
   else if (cmd == "tool")  applyState(ST_TOOL, tok[2].c_str());
   else if (cmd == "error") applyState(ST_ERROR, tok[2].c_str());
+  else if (cmd == "approved") applyState(ST_APPROVED, "");   // debug: play approve reaction
+  else if (cmd == "rejected") applyState(ST_REJECTED, "");   // debug: play reject reaction
+  else if (cmd == "kb") kbRaw((uint8_t)tok[2][0]);           // debug: exercise BLE HID path
   else if (cmd == "approve") {
     strncpy(approveId, tok[2].c_str(), sizeof(approveId) - 1);
     approveId[sizeof(approveId) - 1] = 0;
@@ -269,14 +336,10 @@ void handleTouch() {
     sendLine(dbg);
   }
   if (y < 96 || y > 166) return;
-  if (x < 160) {
-    kbRaw('y');
-    sendApprove(approveId, 1);
-  } else {
-    kbRaw('n');
-    sendApprove(approveId, 0);
-  }
-  applyState(ST_THINK, "");
+  int ok = (x < 160) ? 1 : 0;
+  kbRaw(ok ? 'y' : 'n');
+  sendApprove(approveId, ok);
+  applyState(ok ? ST_APPROVED : ST_REJECTED, "");
 }
 
 // ------------------------- setup / loop -------------------------
@@ -320,7 +383,6 @@ void setup() {
 String rxLine;
 
 void loop() {
-  // serial input
   while (Serial.available()) {
     char c = Serial.read();
     if (c == '\n') {
@@ -331,22 +393,22 @@ void loop() {
     }
   }
 
-  // touch
   bsp_touch_read();
   if (bsp_touch_get_coordinates(&td)) handleTouch();
 
-  // render
-  if (st == ST_APPROVE || st == ST_ERROR) {
+  if (st == ST_APPROVE) {
     if (dirty) {
-      if (st == ST_APPROVE) drawApprove(); else drawError();
+      drawApprove();
       canvas->flush();
       dirty = false;
     }
   } else {
-    uint32_t period = (st == ST_IDLE) ? 140 : (st == ST_THINK ? 60 : 90);
-    if (millis() - lastFrame >= period) {
+    if ((st == ST_APPROVED || st == ST_REJECTED) && millis() >= reactionUntil) {
+      applyState(ST_THINK, "");
+    }
+    if (millis() - lastFrame >= periodForState(st)) {
       lastFrame = millis();
-      drawPet();
+      drawScene();
       canvas->flush();
     }
   }

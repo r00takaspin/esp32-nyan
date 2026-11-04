@@ -70,6 +70,7 @@ bool bleKbConnected() { return s_connected; }
 
 void bleKbReport(uint8_t modifier, uint8_t key) {
   if (!s_inited || !s_input) return;
+  if (!s_connected) return;   // notify() without a peer crashes (LoadProhibited)
   uint8_t rep[8] = {modifier, 0, key, 0, 0, 0, 0, 0};
   s_input->setValue(rep, 8);
   s_input->notify();

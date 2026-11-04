@@ -29,3 +29,7 @@ refwork/*.json
 
 # Arduino CLI libraries (dependencies, installed by the toolchain)
 Arduino/libraries/
+
+# Working frame sets (regenerated from the references)
+refwork/gen*/
+refwork/refs/
