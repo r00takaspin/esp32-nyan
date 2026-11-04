@@ -22,6 +22,8 @@ keyboard.
 - **USB HID keyboard build** — optional wired variant (TinyUSB).
 - **Flicker-free rendering** — each frame is composed in a PSRAM framebuffer and
   blitted with a single SPI flush.
+- **Dim backlight + idle sleep** — the panel runs at ~45% brightness; after 10 s
+  in idle the backlight turns off and wakes on any state change or a tap.
 
 ## Repository layout
 

@@ -53,6 +53,27 @@ St st = ST_IDLE;
 char stateText[180] = "";
 char approveId[48] = "";
 
+#define BL_LEVEL 460            // ~45% backlight duty (0..1023)
+#define IDLE_SLEEP_MS 10000UL   // screen off after 10 s in idle
+
+unsigned long lastActivity = 0;
+bool screenOn = true;
+
+void wakeScreen() {
+  if (!screenOn) {
+    ledcWrite(GFX_BL, BL_LEVEL);
+    screenOn = true;
+  }
+  lastActivity = millis();
+}
+
+void sleepScreen() {
+  if (screenOn) {
+    ledcWrite(GFX_BL, 0);
+    screenOn = false;
+  }
+}
+
 int animIdx = 0;
 uint32_t lastFrame = 0;
 uint32_t reactionUntil = 0;
@@ -278,6 +299,7 @@ void sendApprove(const char *id, int ok) {
 }
 
 void applyState(St s, const char *text) {
+  St prev = st;
   st = s;
   strncpy(stateText, text ? text : "", sizeof(stateText) - 1);
   stateText[sizeof(stateText) - 1] = 0;
@@ -286,6 +308,8 @@ void applyState(St s, const char *text) {
   lastFrame = 0;
   if (s == ST_APPROVED) reactionUntil = millis() + 3600;
   else if (s == ST_REJECTED) reactionUntil = millis() + 1600;
+  if (s != ST_IDLE) wakeScreen();
+  else if (prev != ST_IDLE) lastActivity = millis();
 
   const char *name = (s == ST_IDLE) ? "idle" : (s == ST_THINK) ? "think"
                    : (s == ST_TOOL) ? "tool" : (s == ST_APPROVE) ? "approve"
@@ -358,8 +382,8 @@ void setup() {
   lcd_reg_init();
   gfx->setRotation(1);        // landscape 320x172
 
-  pinMode(GFX_BL, OUTPUT);
-  digitalWrite(GFX_BL, HIGH);
+  ledcAttach(GFX_BL, 5000, 10);
+  ledcWrite(GFX_BL, BL_LEVEL);
 
   if (!canvas->begin(GFX_SKIP_OUTPUT_BEGIN)) Serial.println("canvas FAILED");
 
@@ -394,7 +418,14 @@ void loop() {
   }
 
   bsp_touch_read();
-  if (bsp_touch_get_coordinates(&td)) handleTouch();
+  if (bsp_touch_get_coordinates(&td)) {
+    wakeScreen();
+    handleTouch();
+  }
+
+  if (st == ST_IDLE && screenOn && millis() - lastActivity >= IDLE_SLEEP_MS) {
+    sleepScreen();
+  }
 
   if (st == ST_APPROVE) {
     if (dirty) {
