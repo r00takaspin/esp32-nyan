@@ -1,64 +1,87 @@
 # nyan-buddy
 
-A physical desk-side **Agent Buddy** for [DeepSeek Harness](https://github.com/deepseek-ai):
-a Waveshare **ESP32-S3-Touch-LCD-1.47** shows the agent's live state, lets you
-approve or reject tool calls with a touch button, and acts as a BLE / USB HID
-keyboard.
+Физический настольный **Agent Buddy** для [DeepSeek Harness](https://github.com/deepseek-ai):
+плата Waveshare **ESP32-S3-Touch-LCD-1.47** показывает, чем сейчас занят агент,
+позволяет подтверждать и отклонять вызовы инструментов **касанием экрана** и
+работает как BLE / USB HID клавиатура.
 
-![State sketches](refwork/sketches/contact.png)
+![Скетчи состояний](refwork/sketches/contact.png)
 
-## Features
+## Зачем это нужно
 
-- **Live status on the 172×320 screen** — a per-state pixel animation:
-  the sleeping cat (idle), the classic Nyan Cat (thinking), the cool cat
-  (approve) and the "nope" cat (reject).
-- **Physical approve / deny** — a pending tool approval appears on the device
-  with big `YES` / `NO` buttons and a red/green blinking frame; a tap sends
-  `allowed-once` or `rejected` back to the Harness. If nobody taps within 6 s
-  the request falls back to the normal GUI dialog.
-- **`buddy_show` tool** — the agent can draw a short message on the device.
-- **BLE HID keyboard** (`AgentBuddy`) — the board pairs as a wireless keyboard;
-  approving sends `y`, denying sends `n`.
-- **USB HID keyboard build** — optional wired variant (TinyUSB).
-- **Flicker-free rendering** — each frame is composed in a PSRAM framebuffer and
-  blitted with a single SPI flush.
-- **Dim backlight + idle sleep** — the panel runs at ~45% brightness; after 10 s
-  in idle the backlight turns off and wakes on any state change or a tap.
+Агент работает на компьютере, а вы — нет. Вместо того чтобы постоянно
+переключаться в окно Harness, взгляд падает на маленький экран на столе:
 
-## Repository layout
+- видно, что агент **думает**, **простаивает** или **ждёт подтверждения**;
+- подтвердить опасное действие можно **физическим тапом** по большой кнопке,
+  не трогая компьютер;
+- плата сама прикидывается клавиатурой: нажали YES — в систему ушёл `y`,
+  нажали NO — `n`.
 
+## Возможности
+
+- **Живой статус на экране 172×320** — своя пиксельная анимация для каждого
+  состояния: спящий кот (`idle`), классический Nyan Cat (`thinking`),
+  розовый кот с сердцем (`approve`) и белый «nope»-кот (`reject`).
+- **Физическое подтверждение** — запрос появляется на плате с большими кнопками
+  `YES` / `NO` и мигающей красно-зелёной рамкой. Тап отправляет в Harness
+  `allowed-once` или `rejected`. Если 6 секунд никто не нажал — запрос уходит
+  в обычное окно на компьютере.
+- **Инструмент `buddy_show`** — агент может вывести короткое сообщение на плату.
+- **BLE HID клавиатура** (`AgentBuddy`) — плата спаривается как беспроводная
+  клавиатура; подтверждение шлёт `y`, отказ — `n`.
+- **Сборка с USB HID клавиатурой** — опциональный проводной вариант (TinyUSB).
+- **Без мерцания** — кадр собирается в PSRAM-буфере и выводится одним SPI-флешем.
+- **Приглушённая подсветка и сон** — подсветка на PWM (~45%); после 10 секунд в
+  `idle` экран гаснет и просыпается от любой смены состояния или тапа.
+
+## Что понадобится
+
+**Железо**
+
+- Waveshare ESP32-S3-Touch-LCD-1.47 (ESP32-S3R8, 8 МБ PSRAM, 16 МБ flash);
+- USB-C кабель;
+- компьютер с macOS / Linux / Windows.
+
+**Софт**
+
+- [arduino-cli](https://arduino.github.io/arduino-cli/) и ядро `esp32:esp32` (3.3.x);
+- библиотека `GFX Library for Arduino` (1.6.9);
+- Python 3 с `pyserial`;
+- установленный DeepSeek Harness (GUI).
+
+## Установка
+
+### 1. Прошивка
+
+Установите ядро и библиотеку:
+
+```bash
+arduino-cli core install esp32:esp32
+arduino-cli lib install "GFX Library for Arduino"
 ```
-Arduino/nyancat/            firmware
-  nyancat.ino               display, states, touch, protocol
-  nyan_anims.h              RLE-packed per-state animations (idle/think/approve/reject)
-  nyancat_frames.h          RLE-packed 12-frame Nyan Cat animation
-  esp_lcd_touch_axs5106l.*  AXS5106L touch driver (I2C)
-  ble_kb.*                  BLE HID keyboard backend
-plugins/dsh-agent-buddy/    DeepSeek Harness plugin bundle
-  index.js                  Host: bridge, approval answerer, buddy_show
-  bridge.py                 USB-CDC bridge (JSON lines ⇄ board protocol)
-  client.js                 Client: status pill in the composer dock
-  cordis.patch.yml          bundle patch + config
-refwork/sketches/           state design sketches
-refwork/NyanCat.gif         source Nyan Cat animation (thinking frames)
-```
 
-## Firmware
-
-Target: `esp32:esp32:esp32s3` with `USBMode=hwcdc, CDCOnBoot=cdc, FlashSize=16M, PSRAM=opi`.
+Соберите прошивку:
 
 ```bash
 arduino-cli compile \
   --fqbn "esp32:esp32:esp32s3:UploadSpeed=921600,USBMode=hwcdc,CDCOnBoot=cdc,FlashSize=16M,PSRAM=opi" \
   --build-path .arduino15/build Arduino/nyancat
+```
 
+Подключите плату и прошейте (порт подставьте свой):
+
+```bash
 arduino-cli upload -p /dev/cu.usbmodem1101 \
   --fqbn "esp32:esp32:esp32s3:UploadSpeed=921600,USBMode=hwcdc,CDCOnBoot=cdc,FlashSize=16M,PSRAM=opi" \
   --input-dir .arduino15/build
 ```
 
-For the **USB HID keyboard** variant (TinyUSB; replaces the USB-Serial/JTAG CDC,
-so flashing then needs the BOOT button):
+> **Важно:** если после прошивки экран остался чёрным — **выньте и вставьте USB**.
+> Это сбрасывает контроллер дисплея; программный сброс помогает не всегда.
+
+Вариант с **USB HID клавиатурой** (заменяет USB-Serial/JTAG, поэтому для
+последующей прошивки нужна кнопка BOOT):
 
 ```bash
 arduino-cli compile \
@@ -67,37 +90,105 @@ arduino-cli compile \
   --build-property "compiler.cpp.extra_flags=-DUSB_HID_KB" Arduino/nyancat
 ```
 
-## Plugin
+### 2. Python и pyserial
+
+Плагин запускает небольшой мост на Python, которому нужен `pyserial`:
+
+```bash
+python3 -m pip install pyserial
+```
+
+Плагин сам подбирает рабочий интерпретатор (в том числе локальный
+`.venv-esp/bin/python`, если он есть).
+
+### 3. Плагин для DeepSeek Harness
 
 ```bash
 dsh plugin --profile desktop add "$PWD/plugins/dsh-agent-buddy"
 ```
 
-Requires `python3` with `pyserial` (the plugin auto-detects a working interpreter,
-including the repo-local `.venv-esp`). The plugin exposes
-`http://127.0.0.1:8788/status` → `{"state":"idle","connected":true}`.
+Затем в GUI откройте **Plugins** на боковой панели и включите
+`@local/dsh-agent-buddy`. После правок плагина его нужно **выключить и включить
+заново** (linked-бандл не подхватывается горячей перезагрузкой).
 
-Config (`cordis.patch.yml`):
+### 4. Настройка
 
-| Field | Default | Meaning |
+Все параметры лежат в `plugins/dsh-agent-buddy/cordis.patch.yml`:
+
+| Параметр | По умолчанию | Значение |
 |---|---|---|
-| `port` | `/dev/cu.usbmodem1101` | board USB CDC |
-| `python` | `python3` | interpreter that has `pyserial` |
-| `approvals` | `on` | `on` answers on the device; `off` mirrors and delegates |
-| `timeoutMs` | `6000` | device window before delegating to the GUI |
+| `port` | `/dev/cu.usbmodem1101` | USB-CDC порт платы |
+| `python` | `python3` | интерпретатор с `pyserial` |
+| `approvals` | `on` | `on` — отвечает плата; `off` — только зеркалит в GUI |
+| `timeoutMs` | `6000` | сколько ждать тапа, прежде чем отдать запрос в GUI |
 
-## Serial protocol (board ↔ bridge)
+### 5. Проверка
+
+```bash
+curl http://127.0.0.1:8788/status
+# {"state":"idle","connected":true,"build":"v4","timeout":6000}
+```
+
+`connected: true` — плата на связи. Если `false`, проверьте порт и что мост
+не занят другой программой.
+
+## Как пользоваться
+
+| Состояние | Что на экране |
+|---|---|
+| **idle** | спящий кот с исчезающими «z» |
+| **thinking** | Nyan Cat |
+| **approve** | запрос подтверждения: текст команды, `YES` / `NO`, мигающая рамка |
+| **reject** | «nope»-кот после отказа |
+
+- **Подтверждение** — тап по `YES` (левая половина экрана) или `NO`
+  (правая половина). `YES` отправляет `allowed-once`, `NO` — `rejected`.
+- **`buddy_show`** — попросите агента: «покажи на плите "готово"». Инструмент
+  выведет текст на 8 секунд.
+- **Сон** — если агент простаивает 10 секунд, подсветка гаснет. Любая смена
+  состояния или тап по экрану возвращает её.
+
+## Структура репозитория
 
 ```
-Host → device:  S|idle  S|think  S|tool|<text>  S|approve|<id>|<text>  S|error|<text>
-Device → host:  E|hello  E|approve|<id>|<1|0>  A|<state>  T|<x>|<y>
+Arduino/nyancat/            прошивка
+  nyancat.ino               экран, состояния, тач, протокол
+  nyan_anims.h              RLE-анимации состояний (idle/think/approve/reject)
+  nyancat_frames.h          RLE-анимация Nyan Cat (12 кадров)
+  esp_lcd_touch_axs5106l.*  драйвер тача AXS5106L (I2C)
+  ble_kb.*                  BLE HID клавиатура
+plugins/dsh-agent-buddy/    плагин DeepSeek Harness
+  index.js                  Host: мост, обработчик approve, buddy_show
+  bridge.py                 USB-CDC мост (JSON ⇄ протокол платы)
+  client.js                 Client: статус-пилюля в доке композера
+  cordis.patch.yml          патч бандла и конфиг
+refwork/sketches/           дизайн-скетчи состояний
+refwork/NyanCat.gif         исходная анимация Nyan Cat (кадры thinking)
 ```
 
-## Known limitations
+## Протокол (плата ↔ мост)
 
-- `TOOL` and `ERROR` are currently set manually via `buddy_show`; automatic
-  tool/error detection is a planned extension.
-- The linked bundle is not hot-reloaded; toggle it Off→On (or restart the app)
-  after editing the plugin.
-- BLE pairing and actual keystroke delivery to a host are not covered by the
-  checked-in verification.
+```
+Хост → плата:  S|idle  S|think  S|tool|<текст>  S|approve|<id>|<текст>  S|error|<текст>
+Плата → хост:  E|hello  E|approve|<id>|<1|0>  A|<состояние>  T|<x>|<y>
+```
+
+## Если что-то не работает
+
+| Симптом | Что делать |
+|---|---|
+| После прошивки чёрный экран | Выньте и вставьте USB (полный цикл питания) |
+| Плата не отвечает, `connected: false` | Проверьте порт, закройте программы, держащие serial (например, монитор порта) |
+| Запрос approve не появился на плате | Плагин должен быть включён; проверьте `/status` |
+| Запрос каждый раз уходит в GUI | Увеличьте `timeoutMs` или нажмите YES быстрее |
+| Правки плагина не применяются | Переключите плагин Off→On в Plugins |
+| Прошивка не заливается (порт занят) | Остановите плагин или убейте процесс `bridge.py` |
+
+## Ограничения
+
+- `TOOL` и `ERROR` сейчас выставляются вручную через `buddy_show`;
+  автоматическое определение инструмента/ошибки — в планах.
+- Светодиоды на плате (красный/зелёный) относятся к индикации зарядки и не
+  управляются из кода — алерт approve сделан мигающей рамкой на экране.
+- BLE-спаривание и реальная доставка нажатий в систему в репозитории не
+  проверялись автоматически.
