@@ -13,9 +13,9 @@ keyboard.
   the sleeping cat (idle), the classic Nyan Cat (thinking), the cool cat
   (approve) and the "nope" cat (reject).
 - **Physical approve / deny** — a pending tool approval appears on the device
-  with big `YES` / `NO` buttons; a tap sends `allowed-once` or `rejected` back to
-  the Harness. If nobody taps within 6 s the request falls back to the normal
-  GUI dialog.
+  with big `YES` / `NO` buttons and a red/green blinking frame; a tap sends
+  `allowed-once` or `rejected` back to the Harness. If nobody taps within 6 s
+  the request falls back to the normal GUI dialog.
 - **`buddy_show` tool** — the agent can draw a short message on the device.
 - **BLE HID keyboard** (`AgentBuddy`) — the board pairs as a wireless keyboard;
   approving sends `y`, denying sends `n`.
