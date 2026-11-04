@@ -284,7 +284,7 @@ void applyState(St s, const char *text) {
   animIdx = 0;
   dirty = true;
   lastFrame = 0;
-  if (s == ST_APPROVED) reactionUntil = millis() + 7200;
+  if (s == ST_APPROVED) reactionUntil = millis() + 3600;
   else if (s == ST_REJECTED) reactionUntil = millis() + 1600;
 
   const char *name = (s == ST_IDLE) ? "idle" : (s == ST_THINK) ? "think"

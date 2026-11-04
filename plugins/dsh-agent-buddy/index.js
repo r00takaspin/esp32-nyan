@@ -40,8 +40,27 @@ function pickPython(explicit) {
 export const name = 'agent-buddy'
 export const inject = ['tools', 'agents']
 
+// The board font is ASCII only: transliterate Cyrillic so Russian reasons
+// stay readable instead of turning into glyph noise.
+const RU_ASCII = {
+  'а': 'a', 'б': 'b', 'в': 'v', 'г': 'g', 'д': 'd', 'е': 'e', 'ё': 'e',
+  'ж': 'zh', 'з': 'z', 'и': 'i', 'й': 'y', 'к': 'k', 'л': 'l', 'м': 'm',
+  'н': 'n', 'о': 'o', 'п': 'p', 'р': 'r', 'с': 's', 'т': 't', 'у': 'u',
+  'ф': 'f', 'х': 'h', 'ц': 'c', 'ч': 'ch', 'ш': 'sh', 'щ': 'sch', 'ъ': '',
+  'ы': 'y', 'ь': '', 'э': 'e', 'ю': 'yu', 'я': 'ya',
+}
+
+function toAsciiText(text) {
+  return String(text).replace(/[\u0400-\u04FF]/g, (ch) => {
+    const lower = ch.toLowerCase()
+    const mapped = RU_ASCII[lower]
+    if (mapped == null) return '?'
+    return ch === lower ? mapped : mapped.charAt(0).toUpperCase() + mapped.slice(1)
+  })
+}
+
 function clean(s) {
-  return String(s ?? '')
+  return toAsciiText(String(s ?? ''))
     .replace(/[\r\n|]+/g, ' ')
     .slice(0, 170)
 }
@@ -50,7 +69,7 @@ export function apply(ctx, config = {}) {
   const port = String(config.port || '/dev/cu.usbmodem1101')
   const python = pickPython(config.python ? String(config.python) : undefined)
   const approvalsOn = String(config.approvals ?? 'on') !== 'off'
-  const timeoutMs = Number(config.timeoutMs || 15000)
+  const timeoutMs = Number(config.timeoutMs || 6000)
 
   let bridge = null
   let deviceAlive = false    // true only after the board said "hello"
@@ -147,7 +166,7 @@ export function apply(ctx, config = {}) {
       res.setHeader('Cache-Control', 'no-store')
       if (req.url === '/status') {
         res.setHeader('Content-Type', 'application/json')
-        res.end(JSON.stringify({ state: current, connected: deviceAlive }))
+        res.end(JSON.stringify({ state: current, connected: deviceAlive, build: "v4", timeout: timeoutMs }))
       } else {
         res.statusCode = 404
         res.end('not found')
@@ -197,13 +216,30 @@ export function apply(ctx, config = {}) {
   // agent scope, so we also register there with `prepend` to be asked first.
   const seen = new Set()
 
-  async function approvalHandler(req, next) {
-    const id = String(req?.callId || req?.id || Date.now())
-    if (seen.has(id)) return next()          // another registration already handled it
-    seen.add(id)
-    setTimeout(() => seen.delete(id), Math.max(timeoutMs, 60000))
+  let approveSeq = 0
 
-    const label = req?.displayReason || req?.reason || req?.tool || 'Approval needed'
+  async function approvalHandler(req, next) {
+    const key = String(req?.callId || req?.id || Date.now())
+    if (seen.has(key)) return next()         // another registration already handled it
+    seen.add(key)
+    setTimeout(() => seen.delete(key), Math.max(timeoutMs, 60000))
+    // The board keeps the id in a 48 byte buffer, so long call ids get
+    // truncated and the tap would never match. Use a short device id.
+    const id = 'a' + ++approveSeq
+
+    // `tool` may be a descriptor object and `reason` may be structured:
+    // only ever put real strings on the device.
+    const asText = (v) => {
+      if (typeof v === 'string') return v
+      if (v && typeof v === 'object') {
+        const t = v.en || v.ru || v.zh || v.message || v.text || v.description || v.label || v.reason
+        return typeof t === 'string' ? t : ''
+      }
+      return ''
+    }
+    const toolName = typeof req?.tool === 'string' ? req.tool : req?.tool?.name || req?.tool?.id || ''
+    const reasonText = asText(req?.displayReason) || asText(req?.reason)
+    const label = [toolName, reasonText].filter(Boolean).join(': ') || 'Approval needed'
     const shown = show('approve', label, id)
     if (!approvalsOn || !shown) return next()
 
@@ -214,8 +250,8 @@ export function apply(ctx, config = {}) {
       }, timeoutMs)
     })
     // Let the device play its approved/rejected reaction before switching back.
-    if (outcome !== null) reactionUntil = Date.now() + 7500
-    setTimeout(() => show('think'), 7500)
+    if (outcome !== null) reactionUntil = Date.now() + 3800
+    setTimeout(() => show('think'), 3800)
     if (outcome === null) return next()      // no tap in time: let the GUI decide
     return outcome
   }
