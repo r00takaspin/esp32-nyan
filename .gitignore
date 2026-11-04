@@ -1,0 +1,31 @@
+# OS
+.DS_Store
+
+# Toolchains / binaries / build output (never commit)
+.arduino15/
+.venv-esp/
+arduino-cli/
+waveshare-demo/
+waveshare-demo.zip
+gfx-1.6.9.zip
+__pycache__/
+*.pyc
+
+# Unrelated projects living in the shared workspace
+3d_models/
+nes-reader/
+pylibs/
+/*.py
+
+# Working artifacts: keep only the design deliverables
+refwork/frames/
+refwork/refs/
+refwork/plugin-test/
+refwork/dsh-docs/
+refwork/*.png
+refwork/*.gif
+refwork/*.json
+!refwork/NyanCat.gif
+
+# Arduino CLI libraries (dependencies, installed by the toolchain)
+Arduino/libraries/
