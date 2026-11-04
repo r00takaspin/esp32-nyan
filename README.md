@@ -38,6 +38,7 @@ plugins/dsh-agent-buddy/    DeepSeek Harness plugin bundle
   client.js                 Client: status pill in the composer dock
   cordis.patch.yml          bundle patch + config
 refwork/sketches/           state design sketches
+refwork/NyanCat.gif         source Nyan Cat animation (thinking frames)
 ```
 
 ## Firmware
