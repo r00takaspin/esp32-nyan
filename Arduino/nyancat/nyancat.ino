@@ -58,6 +58,8 @@ char approveId[48] = "";
 
 unsigned long lastActivity = 0;
 bool screenOn = true;
+bool blinkOn = false;
+unsigned long lastBlink = 0;
 
 void wakeScreen() {
   if (!screenOn) {
@@ -271,18 +273,25 @@ void drawWrapped(int x, int y, int maxW, const char *s, uint16_t col, int sz, in
 
 void drawApprove() {
   canvas->fillScreen(C_PANEL);
+  // Alternating red/green frame: the visual "LED" alert for a pending approval.
+  uint16_t edge = blinkOn ? C_GREEN : C_RED;
+  // Inset and thick so the panel's clipping does not eat the frame.
+  canvas->fillRect(2, 2, 316, 6, edge);
+  canvas->fillRect(2, 164, 316, 6, edge);
+  canvas->fillRect(2, 2, 6, 168, edge);
+  canvas->fillRect(312, 2, 6, 168, edge);
   canvas->setTextColor(C_AMBER);
   canvas->setTextSize(1);
-  canvas->setCursor(6, 4);
+  canvas->setCursor(12, 11);
   canvas->print("APPROVE TOOL CALL?");
-  drawWrapped(6, 16, 308, stateText, C_WHITE, 1, 10);
-  canvas->fillRoundRect(6, 96, 152, 70, 12, C_GREEN);
-  canvas->fillRoundRect(162, 96, 152, 70, 12, C_RED);
+  drawWrapped(12, 23, 296, stateText, C_WHITE, 1, 10);
+  canvas->fillRoundRect(14, 100, 140, 62, 12, C_GREEN);
+  canvas->fillRoundRect(166, 100, 140, 62, 12, C_RED);
   canvas->setTextColor(C_BLACK);
   canvas->setTextSize(3);
-  canvas->setCursor(55, 119);
+  canvas->setCursor(57, 121);
   canvas->print("YES");
-  canvas->setCursor(220, 119);
+  canvas->setCursor(218, 121);
   canvas->print("NO");
 }
 
@@ -359,7 +368,7 @@ void handleTouch() {
     snprintf(dbg, sizeof(dbg), "T|%d|%d", x, y);
     sendLine(dbg);
   }
-  if (y < 96 || y > 166) return;
+  if (y < 100 || y > 162) return;
   int ok = (x < 160) ? 1 : 0;
   kbRaw(ok ? 'y' : 'n');
   sendApprove(approveId, ok);
@@ -428,6 +437,11 @@ void loop() {
   }
 
   if (st == ST_APPROVE) {
+    if (millis() - lastBlink >= 400) {
+      lastBlink = millis();
+      blinkOn = !blinkOn;
+      dirty = true;
+    }
     if (dirty) {
       drawApprove();
       canvas->flush();
