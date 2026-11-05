@@ -246,7 +246,10 @@ export function apply(ctx, config = {}) {
     // Device-first: the panel stays until the user taps, and the GUI dialog
     // is not opened (it cannot be closed from here). If the board is not
     // answering we immediately fall back to the GUI so nobody gets blocked.
-    if (!deviceAlive) return next()
+    if (!deviceAlive) {
+      show('think')   // reset the poll state so a later ack cannot strand us
+      return next()
+    }
 
     let watcher = null
     const outcome = await new Promise((resolve) => {

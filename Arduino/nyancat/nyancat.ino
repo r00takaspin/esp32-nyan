@@ -149,11 +149,12 @@ void drawAnimFrame(int anim, int idx) {
   uint32_t p = ANIM_OFF[anim][idx];
   uint32_t end = ANIM_OFF[anim][idx + 1];
   int pos = 0;
-  while (p < end) {
+  const int limit = ANIM_W * ANIM_H;
+  while (p < end && pos < limit) {
     uint8_t cnt = ANIM_RLE[p++];
     uint8_t ix = ANIM_RLE[p++];
     uint16_t col = ANIM_PAL[ix];
-    for (uint8_t k = 0; k < cnt; k++) fb[pos++] = col;
+    for (uint8_t k = 0; k < cnt && pos < limit; k++) fb[pos++] = col;
   }
 }
 
@@ -164,11 +165,12 @@ void drawNyanFrame(int idx) {
   uint32_t p = NYAN_OFF[idx];
   uint32_t end = NYAN_OFF[idx + 1];
   int pos = 0;
-  while (p < end) {
+  const int limit = FRAME_W * FRAME_H;
+  while (p < end && pos < limit) {
     uint8_t cnt = NYAN_RLE[p++];
     uint8_t ix = NYAN_RLE[p++];
     uint16_t col = NYAN_PAL565[ix];
-    for (uint8_t k = 0; k < cnt; k++) fb[pos++] = col;
+    for (uint8_t k = 0; k < cnt && pos < limit; k++) fb[pos++] = col;
   }
 }
 
@@ -189,6 +191,7 @@ uint32_t periodForState(St s) {
     case ST_IDLE:     return 220;
     case ST_THINK:    return 110;
     case ST_APPROVED: return 90;    // fast cool-cat loop
+    case ST_REJECTED: return 70;    // fast nope-cat loop
     default:          return 140;
   }
 }
@@ -346,9 +349,6 @@ void parseLine(const String &line) {
   else if (cmd == "think") applyState(ST_THINK, "");
   else if (cmd == "tool")  applyState(ST_TOOL, tok[2].c_str());
   else if (cmd == "error") applyState(ST_ERROR, tok[2].c_str());
-  else if (cmd == "approved") applyState(ST_APPROVED, "");   // debug: play approve reaction
-  else if (cmd == "rejected") applyState(ST_REJECTED, "");   // debug: play reject reaction
-  else if (cmd == "kb") kbRaw((uint8_t)tok[2][0]);           // debug: exercise BLE HID path
   else if (cmd == "approve") {
     strncpy(approveId, tok[2].c_str(), sizeof(approveId) - 1);
     approveId[sizeof(approveId) - 1] = 0;
