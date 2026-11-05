@@ -377,6 +377,11 @@ void handleTouch() {
 
 // ------------------------- setup / loop -------------------------
 void setup() {
+  // Keep the backlight off during boot: a floating pin lets the panel show
+  // uninitialised GRAM noise before the first clean frame.
+  pinMode(GFX_BL, OUTPUT);
+  digitalWrite(GFX_BL, LOW);
+
   pinMode(LCD_RST, OUTPUT);
   digitalWrite(LCD_RST, 0);
   delay(10);
@@ -392,9 +397,13 @@ void setup() {
   gfx->setRotation(1);        // landscape 320x172
 
   ledcAttach(GFX_BL, 5000, 10);
-  ledcWrite(GFX_BL, BL_LEVEL);
+  ledcWrite(GFX_BL, 0);          // stay dark until the first clean frame
 
   if (!canvas->begin(GFX_SKIP_OUTPUT_BEGIN)) Serial.println("canvas FAILED");
+  // Wipe the panel once so uninitialised GRAM noise never shows at boot.
+  canvas->fillScreen(C565(0, 0, 0));
+  canvas->flush();
+  ledcWrite(GFX_BL, BL_LEVEL);
 
   Wire.begin(TOUCH_SDA, TOUCH_SCL);
   bsp_touch_init(&Wire, TOUCH_RST, TOUCH_INT, gfx->getRotation(), gfx->width(), gfx->height());
@@ -410,6 +419,19 @@ void setup() {
 
   sendLine("E|hello");
   Serial.println("AgentBuddy ready");
+
+  // Boot splash: the keyboard cat, played twice.
+  {
+    int n = ANIM_COUNT[ANIM_BOOT];
+    for (int loop = 0; loop < 2; loop++) {
+      for (int i = 0; i < n; i++) {
+        drawAnimFrame(ANIM_BOOT, i);
+        canvas->flush();
+        delay(60);
+      }
+    }
+  }
+
   applyState(ST_IDLE, "");
 }
 
