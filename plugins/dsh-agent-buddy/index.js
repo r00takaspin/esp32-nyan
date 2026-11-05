@@ -69,7 +69,7 @@ export function apply(ctx, config = {}) {
   const port = String(config.port || '/dev/cu.usbmodem1101')
   const python = pickPython(config.python ? String(config.python) : undefined)
   const approvalsOn = String(config.approvals ?? 'on') !== 'off'
-  const timeoutMs = Number(config.timeoutMs || 6000)
+  const timeoutMs = Number(config.timeoutMs || 20000)
 
   let bridge = null
   let deviceAlive = false    // true only after the board said "hello"
@@ -243,17 +243,34 @@ export function apply(ctx, config = {}) {
     const shown = show('approve', label, id)
     if (!approvalsOn || !shown) return next()
 
+    // Device-first: the panel stays until the user taps, and the GUI dialog
+    // is not opened (it cannot be closed from here). If the board is not
+    // answering we immediately fall back to the GUI so nobody gets blocked.
+    if (!deviceAlive) return next()
+
+    let watcher = null
     const outcome = await new Promise((resolve) => {
-      pending.set(id, resolve)
-      setTimeout(() => {
-        if (pending.delete(id)) resolve(null)
-      }, timeoutMs)
+      pending.set(id, (value) => {
+        if (watcher) clearInterval(watcher)
+        resolve(value)
+      })
+      watcher = setInterval(() => {
+        if (!deviceAlive) {
+          if (watcher) clearInterval(watcher)
+          if (pending.delete(id)) resolve(null)
+        }
+      }, 500)
     })
-    // Let the device play its approved/rejected reaction before switching back.
-    if (outcome !== null) reactionUntil = Date.now() + 3800
-    setTimeout(() => show('think'), 3800)
-    if (outcome === null) return next()      // no tap in time: let the GUI decide
-    return outcome
+
+    if (outcome !== null) {
+      // Physical tap: let the device play its reaction before switching back.
+      reactionUntil = Date.now() + 3800
+      setTimeout(() => show('think'), 3800)
+      return outcome
+    }
+    // The board vanished while waiting: hand the question to the GUI.
+    show('think')
+    return next()
   }
 
   function onAgentStatus(ev) {
