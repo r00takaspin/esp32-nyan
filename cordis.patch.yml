@@ -5,4 +5,4 @@
         port: '/dev/cu.usbmodem1101'
         python: 'python3'
         approvals: 'on'
-        timeoutMs: 6000
+        timeoutMs: 20000
