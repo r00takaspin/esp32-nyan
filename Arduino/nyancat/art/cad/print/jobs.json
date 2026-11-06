@@ -1,0 +1,142 @@
+{
+ "01_faceplate": {
+  "plate_mm": [
+   57.6,
+   36.0,
+   4.2
+  ],
+  "cm3": {
+   "pink": 0.36,
+   "black": 1.85,
+   "magenta": 0.1,
+   "beige": 0.5
+  },
+  "filaments": {
+   "1": [
+    "black",
+    "#202024"
+   ],
+   "2": [
+    "beige",
+    "#F0BF8E"
+   ],
+   "3": [
+    "pink",
+    "#F58AD6"
+   ],
+   "4": [
+    "magenta",
+    "#E02E86"
+   ]
+  }
+ },
+ "02_head": {
+  "plate_mm": [
+   33.6,
+   31.2,
+   33.7
+  ],
+  "cm3": {
+   "cheek": 0.07,
+   "black": 25.48,
+   "white": 0.02,
+   "gray": 0.45
+  },
+  "filaments": {
+   "1": [
+    "black",
+    "#202024"
+   ],
+   "2": [
+    "gray",
+    "#8C8F96"
+   ],
+   "3": [
+    "white",
+    "#F1F1EC"
+   ],
+   "4": [
+    "cheek",
+    "#F0908F"
+   ]
+  }
+ },
+ "03_tail_backlegs": {
+  "plate_mm": [
+   48.8,
+   32.5,
+   7.2
+  ],
+  "cm3": {
+   "gray": 0.06,
+   "black": 4.21
+  },
+  "filaments": {
+   "1": [
+    "black",
+    "#202024"
+   ],
+   "2": [
+    "gray",
+    "#8C8F96"
+   ]
+  }
+ },
+ "04_rainbow": {
+  "plate_mm": [
+   27.2,
+   13.0,
+   28.8
+  ],
+  "cm3": {
+   "red": 1.2,
+   "blue": 0.88,
+   "green": 0.41,
+   "yellow": 0.41,
+   "violet": 1.2,
+   "orange": 0.88
+  },
+  "filaments": {
+   "1": [
+    "violet",
+    "#6A3ED6"
+   ],
+   "2": [
+    "blue",
+    "#1E8EE6"
+   ],
+   "3": [
+    "green",
+    "#3AC63A"
+   ],
+   "4": [
+    "yellow",
+    "#F6DC1E"
+   ],
+   "5": [
+    "orange",
+    "#F5901E"
+   ],
+   "6": [
+    "red",
+    "#E3202B"
+   ]
+  }
+ },
+ "05_black_parts": {
+  "plate_mm": [
+   114.9,
+   80.0,
+   25.5
+  ],
+  "cm3": {
+   "black": 15.94
+  },
+  "filaments": {
+   "1": [
+    "black",
+    "#202024"
+   ]
+  }
+ }
+}

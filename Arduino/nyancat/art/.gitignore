@@ -1,0 +1,18 @@
+# Python env for CadQuery/OCP (recreate: python3 -m venv .venv && pip install cadquery trimesh manifold3d shapely scipy rtree lxml pymupdf)
+.venv/
+__pycache__/
+
+# Compiled helpers (build from render.c / cad/raster.c)
+rt
+cad/raster
+
+# Regenerable intermediates
+*.f32
+tex/
+cad/board_device.stl
+cad/out/asm_*.stl
+
+# Vendor files from Waveshare (download from docs.waveshare.com, Resources)
+board/2d3d.zip
+board/2d3d/
+board/schematic.pdf

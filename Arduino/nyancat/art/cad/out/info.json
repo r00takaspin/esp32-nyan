@@ -1,0 +1,86 @@
+{
+ "pillars": {
+  "tr": [
+   17.3,
+   39.9
+  ],
+  "br": [
+   14.4,
+   10.3
+  ],
+  "lm": [
+   -29.3,
+   25.2
+  ]
+ },
+ "dowels": [
+  [
+   22.0,
+   37.0
+  ],
+  [
+   17.3,
+   39.9
+  ],
+  [
+   -28.3,
+   11.3
+  ],
+  [
+   -28.3,
+   39.1
+  ]
+ ],
+ "ZG": 2.3,
+ "chassis": [
+  18.51,
+  21.110000000000003
+ ],
+ "pin_tip": 17.91,
+ "standoff_end": 12.95,
+ "usb_z": 10.08,
+ "act": [
+  -18.1,
+  36.76,
+  13.639999999999999,
+  10.559999999999999
+ ],
+ "active_cx": -4.845000000000001,
+ "bat_box": [
+  -24.05,
+  9.95,
+  11.45,
+  40.45
+ ],
+ "volumes": {
+  "faceplate/black": 1.848,
+  "faceplate/beige": 0.498,
+  "faceplate/pink": 0.359,
+  "faceplate/magenta": 0.102,
+  "shell/black": 7.716,
+  "chassis/black": 3.926,
+  "cover/black": 4.146,
+  "head/cheek": 0.074,
+  "head/white": 0.021,
+  "head/gray": 0.447,
+  "head/black": 25.477,
+  "tail/gray": 0.023,
+  "tail/black": 0.541,
+  "backlegs/gray": 0.037,
+  "backlegs/black": 3.67,
+  "rainbowA/red": 0.599,
+  "rainbowA/orange": 0.341,
+  "rainbowA/yellow": 0.203,
+  "rainbowA/green": 0.203,
+  "rainbowA/blue": 0.539,
+  "rainbowA/violet": 0.599,
+  "rainbowB/red": 0.599,
+  "rainbowB/orange": 0.539,
+  "rainbowB/yellow": 0.203,
+  "rainbowB/green": 0.203,
+  "rainbowB/blue": 0.341,
+  "rainbowB/violet": 0.599,
+  "plunger_top/black": 0.04,
+  "plunger_bot/black": 0.039
+ }
+}
