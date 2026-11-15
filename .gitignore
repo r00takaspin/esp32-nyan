@@ -39,3 +39,11 @@ Arduino/nyancat/build/
 Arduino/nyancat/build_cache/
 Arduino/nyancat/tools/build_flash.log
 Arduino/nyancat/tools/hostsim/out/
+Arduino/nyancat/GFX_Library_for_Arduino/
+Arduino/nyancat/fw_backup_v1/
+serial_log.txt
+
+# Unrelated / vendor material
+Arduino/XIAO_Sense_Demo/
+refwork/board2d/
+refwork/case/

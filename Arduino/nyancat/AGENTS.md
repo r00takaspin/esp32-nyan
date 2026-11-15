@@ -14,7 +14,9 @@
 
 Ядро ESP32 **2.0.14** (в `nyancat.ino` есть shim для `ledc`, чтобы собиралось и под 2.x, и под 3.x).
 
-Библиотека GFX v1.5.9 лежит рядом со скетчем: `Arduino/nyancat/GFX_Library_for_Arduino/`.
+Библиотека GFX v1.5.9 лежит рядом со скетчем: `Arduino/nyancat/GFX_Library_for_Arduino/` (в git не входит,
+26 МБ). Если её нет: `arduino-cli lib download "GFX Library for Arduino@1.5.9"` и распаковать сюда
+под этим именем. Глобальная 1.6.9 из `Arduino/libraries/` не годится — нужна именно 1.5.9.
 
 ```bash
 cd Arduino/nyancat
@@ -153,3 +155,20 @@ BLE: имя теперь `AgentBuddy-XXXX` (из MAC, показывается �
    экран APPROVE появляется, тап YES → `E|approve|t1|1`. **Это главный регресс-тест.**
 3. `S|ping` → строка `I|fw=2.0|…`, `bat` ≈ 3300–4200 при подключённой батарее.
 4. Пэйринг в macOS → «Connected!»; после перезагрузки платы Mac переподключается сам (bonding).
+
+### Откат на v1
+
+Бинарники v1 лежат локально в `fw_backup_v1/` (не в git). Если их нет — исходники v1 в коммите `8214eee`:
+`git worktree add /tmp/nyan-v1 8214eee`, собрать оттуда и прошить как обычно.
+
+### Плагин Claude Code
+
+Маркетплейс `plugins/.claude-plugin/marketplace.json`, плагин `plugins/claude-agent-buddy/`. Установка (в Claude Code):
+
+```
+/plugin marketplace add ~/Documents/deepseek-harness/default-workspace/plugins
+/plugin install agent-buddy@nyan-buddy
+/agent-buddy:status
+```
+
+Плагин делит lock `/tmp/nyan-buddy-bridge.lock` с мостом DeepSeek: пока DSH держит порт, плагин платы не видит.
