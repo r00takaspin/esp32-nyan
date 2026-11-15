@@ -104,6 +104,7 @@ void saveSettings() {
 inline uint16_t blLevel() { return BRI_LEVELS[cfgBri]; }
 
 // ---- screen power ----
+uint32_t lastFrame = 0;
 unsigned long lastActivity = 0;
 bool screenOn = true;
 bool blinkOn = false;
@@ -111,8 +112,10 @@ unsigned long lastBlink = 0;
 
 void wakeScreen() {
   if (!screenOn) {
+    gfx->displayOn();          // SLPOUT; GRAM survives sleep, so the last frame is back at once
     ledcWrite(BL_CH, blLevel());
     screenOn = true;
+    lastFrame = 0;             // scene rendering was paused while dark
   }
   lastActivity = millis();
 }
@@ -120,6 +123,7 @@ void wakeScreen() {
 void sleepScreen() {
   if (screenOn) {
     ledcWrite(BL_CH, 0);
+    gfx->displayOff();         // SLPIN: panel driver and its oscillator stop too
     screenOn = false;
   }
 }
@@ -143,7 +147,7 @@ inline bool hostLinked() { return lastHostRx && millis() - lastHostRx < HOST_LIN
 char bleName[24] = "AgentBuddy";
 
 int animIdx = 0;
-uint32_t lastFrame = 0;
+uint32_t frameMs = 0;          // last scene draw + flush time, reported as fms=
 uint32_t reactionUntil = 0;
 bool dirty = true;
 uint32_t lastTouchSeen = 0;
@@ -442,10 +446,11 @@ void sendInfo() {
   char buf[220];
   snprintf(buf, sizeof(buf),
            "I|fw=%s|name=%s|ble=%d|bond=%d|peer=%s|bat=%d|pct=%d|pwr=%s|usb=%d"
-           "|bri=%u|sleep=%u|kb=%s|setup=%d|ui=%s|st=%s",
+           "|bri=%u|sleep=%u|kb=%s|setup=%d|ui=%s|st=%s|tmp=%d|fms=%lu|scr=%d",
            FW_VERSION, bleName, ble, bonds, bond, batMillivolts(), batPercent(),
            batPowerName(batPower()), batUsbHost() ? 1 : 0, cfgBri, SLEEP_OPTIONS[cfgSleep],
-           KBN[cfgKb], cfgSetupDone ? 1 : 0, UIN[ui], stateName(st));
+           KBN[cfgKb], cfgSetupDone ? 1 : 0, UIN[ui], stateName(st),
+           (int)temperatureRead(), (unsigned long)frameMs, screenOn ? 1 : 0);
   sendLine(buf);
 }
 
@@ -652,6 +657,9 @@ void onTap(int x, int y) {
 
 // ------------------------- setup / loop -------------------------
 void setup() {
+  // 160 MHz: a full frame takes ~45 ms instead of ~30 ms, still under the
+  // fastest animation period (70 ms), and the chip runs noticeably cooler.
+  setCpuFrequencyMhz(160);
   // Keep the backlight off during boot: a floating pin lets the panel show
   // uninitialised GRAM noise before the first clean frame.
   pinMode(GFX_BL, OUTPUT);
@@ -797,11 +805,13 @@ void loop() {
       applyState(afterReaction, "");
       if (uiResume != UI_NONE) { openUi(uiResume); uiResume = UI_NONE; }
     }
-    if (millis() - lastFrame >= periodForState(st)) {
+    // Dark screen (idle only): no point pushing 110 KB frames into a sleeping panel.
+    if (screenOn && millis() - lastFrame >= periodForState(st)) {
       lastFrame = millis();
       drawScene();
       canvas->flush();
+      frameMs = millis() - lastFrame;
     }
   }
-  delay(2);
+  delay(screenOn ? 2 : 20);    // dark: 50 Hz touch polling is plenty to catch a wake tap
 }
