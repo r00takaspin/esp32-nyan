@@ -1,6 +1,7 @@
 // Host half of the Agent Buddy bundle.
 //
-// It keeps a small Python bridge (bridge.py) attached to the ESP32 over USB CDC
+// It keeps a small Python bridge (bridge.py) attached to the ESP32 over USB CDC,
+// or over Bluetooth when the cable is out (bridge.py picks the transport),
 // and does two things:
 //   1. answers `approval/request` with the physical YES / NO touch buttons;
 //   2. exposes `buddy_show` so the agent can draw a message on the device.
@@ -72,7 +73,13 @@ export function apply(ctx, config = {}) {
   const timeoutMs = Number(config.timeoutMs || 20000)
 
   let bridge = null
-  let deviceAlive = false    // true only after the board said "hello"
+  // The board is "alive" while it keeps answering the bridge's 2.5 s pings.
+  // (It used to be a flag set by any line and never cleared, which stranded
+  // approvals on a board that had gone away.)
+  const ALIVE_MS = 7000
+  let lastSeen = 0
+  const deviceAlive = () => Date.now() - lastSeen < ALIVE_MS
+  let linkVia = ''
   let outBuf = ''
   const pending = new Map()
   let current = 'idle'
@@ -99,8 +106,14 @@ export function apply(ctx, config = {}) {
 
   function onEvent(evt) {
     if (!evt) return
-    deviceAlive = true   // any line from the board proves the link is up
-    if (evt.evt === 'hello') return
+    if (evt.evt === 'link') {
+      linkVia = evt.state === 'disconnected' ? '' : evt.via
+      if (evt.state === 'disconnected') lastSeen = 0
+      return
+    }
+    if (evt.evt === 'error') return
+    lastSeen = Date.now()   // a line from the board proves the link is up
+    if (evt.evt === 'hello' || evt.evt === 'info') return
     if (evt.evt === 'approve' && evt.id != null) {
       const resolve = pending.get(String(evt.id))
       if (resolve) {
@@ -124,11 +137,12 @@ export function apply(ctx, config = {}) {
       })
     } catch {
       bridge = null
-      deviceAlive = false
+      lastSeen = 0
       return
     }
     bridge = child
-    deviceAlive = false
+    lastSeen = 0
+    linkVia = ''
     child.stdout.setEncoding('utf8')
     child.stdout.on('data', (chunk) => {
       outBuf += chunk
@@ -147,13 +161,13 @@ export function apply(ctx, config = {}) {
     child.on('exit', () => {
       if (bridge === child) {
         bridge = null
-        deviceAlive = false
+        lastSeen = 0
       }
     })
     child.on('error', () => {
       if (bridge === child) {
         bridge = null
-        deviceAlive = false
+        lastSeen = 0
       }
     })
   }
@@ -166,7 +180,7 @@ export function apply(ctx, config = {}) {
       res.setHeader('Cache-Control', 'no-store')
       if (req.url === '/status') {
         res.setHeader('Content-Type', 'application/json')
-        res.end(JSON.stringify({ state: current, connected: deviceAlive, build: "v4", timeout: timeoutMs }))
+        res.end(JSON.stringify({ state: current, connected: deviceAlive(), via: linkVia, build: "v5", timeout: timeoutMs }))
       } else {
         res.statusCode = 404
         res.end('not found')
@@ -246,7 +260,7 @@ export function apply(ctx, config = {}) {
     // Device-first: the panel stays until the user taps, and the GUI dialog
     // is not opened (it cannot be closed from here). If the board is not
     // answering we immediately fall back to the GUI so nobody gets blocked.
-    if (!deviceAlive) {
+    if (!deviceAlive()) {
       show('think')   // reset the poll state so a later ack cannot strand us
       return next()
     }
@@ -258,7 +272,7 @@ export function apply(ctx, config = {}) {
         resolve(value)
       })
       watcher = setInterval(() => {
-        if (!deviceAlive) {
+        if (!deviceAlive()) {
           if (watcher) clearInterval(watcher)
           if (pending.delete(id)) resolve(null)
         }
