@@ -47,3 +47,6 @@ serial_log.txt
 Arduino/XIAO_Sense_Demo/
 refwork/board2d/
 refwork/case/
+
+# Original phone photos (HEIC with location metadata): export stripped copies into docs/
+docs/photos/

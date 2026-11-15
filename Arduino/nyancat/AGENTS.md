@@ -189,3 +189,25 @@ BLE: имя теперь `AgentBuddy-XXXX` (из MAC, показывается �
 - Журнал разряда: кольцо в RTC-памяти (переживает рестарт, не отключение питания), раз в 5 мин;
   `S|log` → строки `L|…` (младшие 13 бит — мВ, флаги 0x2000 usb, 0x4000 экран, 0x8000 standby), `S|logclr`.
 - `I|` дополнительно: `tmp` (°C чипа), `fms` (мс на кадр), `scr`, `mhz`, `log`.
+
+### Дамп сбоя (coredump)
+
+Ядро 2.0.14 пишет coredump во флеш (`CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH`), раздел `coredump` @ `0xFF0000`
+(64 КБ) в схеме `app3M_fat9M_16MB`. После перезагрузки по сбою (USB-лог панику не показывает):
+
+```bash
+"$ESPTOOL" --chip esp32s3 --port /dev/cu.usbmodem1101 --before default_reset --after hard_reset \
+  read_flash 0xFF0000 0x10000 coredump.bin            # мост заблокировать, как при прошивке
+```
+
+Файл: 20 байт заголовка + ELF. В заметке `EXTRA_INFO` — причина (`EXCCAUSE`, 28 = LoadProhibited) и
+`EXCVADDR`; в первой `PRSTATUS` — PC упавшей задачи и `a0` (адрес возврата: старшие 2 бита заменить на `0x4`).
+Расшифровка адресов:
+
+```bash
+A2L=$(find ~/Library/Arduino15/packages/esp32/tools -name xtensa-esp32s3-elf-addr2line | head -1)
+$A2L -pfiaC -e build/nyancat.ino.elf 0x<pc> 0x<a0>
+```
+
+Так нашлась ошибка «характеристика HID создана после `startServices()`»: PC в `BLEService::getServer()`,
+вызов из `BLECharacteristic::notify()`.
