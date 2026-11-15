@@ -73,6 +73,10 @@ static uint8_t asciiToHid(uint8_t c, uint8_t *mod) {
 void bleKbBegin(const char *name) {
   if (s_inited) return;
   BLEDevice::init(name);
+  // Default is +3 dBm. macOS Bluetooth Settings only lists new BLE HID devices
+  // stronger than -60 dBm RSSI, and at +3 dBm the board sat at -58..-65 a desk away.
+  BLEDevice::setPower(ESP_PWR_LVL_P9, ESP_BLE_PWR_TYPE_ADV);
+  BLEDevice::setPower(ESP_PWR_LVL_P9, ESP_BLE_PWR_TYPE_DEFAULT);
   s_srv = BLEDevice::createServer();
   s_srv->setCallbacks(new SrvCb());
 
