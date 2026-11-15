@@ -86,8 +86,12 @@ void bleKbBegin(const char *name) {
   s_hid->pnp(0x02, 0x1234, 0x5678, 0x0100);
   s_hid->hidInfo(0x00, 0x01);
   s_hid->reportMap((uint8_t *)REPORT_MAP, sizeof(REPORT_MAP));
-  s_hid->startServices();
+  // Must exist before startServices(): the core registers characteristics
+  // with the stack only when the service starts. Created after it, the input
+  // report had no service, the Mac never saw it, and notify() crashed
+  // (LoadProhibited in BLEService::getServer) on the first key press.
   s_input = s_hid->inputReport(1);
+  s_hid->startServices();
   s_hid->setBatteryLevel(s_battery);
 
 #if ESP_ARDUINO_VERSION < ESP_ARDUINO_VERSION_VAL(3, 0, 0)
