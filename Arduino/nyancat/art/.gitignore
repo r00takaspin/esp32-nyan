@@ -16,3 +16,6 @@ cad/out/asm_*.stl
 board/2d3d.zip
 board/2d3d/
 board/schematic.pdf
+
+# v2 intermediates (regenerate: cd cad && ../.venv/bin/python nyan_cad_v2.py)
+cad/v2/out/asm_*.stl

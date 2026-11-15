@@ -394,7 +394,7 @@ void setup() {
 
   if (!gfx->begin()) Serial.println("gfx FAILED");
   lcd_reg_init();
-  gfx->setRotation(1);        // landscape 320x172
+  gfx->setRotation(3);        // landscape 320x172; Pixel Nyan case v2: USB-C on the left, head on the right
 
   ledcAttach(GFX_BL, 5000, 10);
   ledcWrite(GFX_BL, 0);          // stay dark until the first clean frame

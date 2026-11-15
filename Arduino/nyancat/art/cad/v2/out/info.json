@@ -1,0 +1,74 @@
+{
+ "pillars": {
+  "tr": [
+   17.3,
+   39.9
+  ],
+  "br": [
+   14.4,
+   10.3
+  ],
+  "lm": [
+   -29.3,
+   25.2
+  ]
+ },
+ "ZG": 2.3,
+ "chassis": [
+  18.51,
+  21.110000000000003
+ ],
+ "pin_tip": 17.91,
+ "standoff_end": 12.95,
+ "usb_z": 10.08,
+ "act": [
+  -18.1,
+  36.76,
+  13.639999999999999,
+  10.559999999999999
+ ],
+ "active_cx": -2.3550000000000004,
+ "bat_box": [
+  -24.05,
+  9.0,
+  11.45,
+  34.5
+ ],
+ "cover_in": 27.5,
+ "back": 29.5,
+ "switch": [
+  15.4,
+  25.2,
+  3.7,
+  8.7,
+  3.7
+ ],
+ "wire_window": [
+  -20.0,
+  28.5,
+  -3.5,
+  60.0
+ ],
+ "volumes": {
+  "body/beige": 0.525,
+  "body/gray": 0.484,
+  "body/pink": 0.537,
+  "body/black": 40.38,
+  "chassis/black": 3.515,
+  "cover/black": 3.532,
+  "tail/gray": 0.023,
+  "tail/black": 0.248,
+  "rainbowA/red": 1.359,
+  "rainbowA/orange": 1.299,
+  "rainbowA/yellow": 0.963,
+  "rainbowA/green": 0.963,
+  "rainbowA/blue": 1.101,
+  "rainbowA/violet": 1.359,
+  "rainbowB/red": 1.359,
+  "rainbowB/orange": 1.359,
+  "rainbowB/yellow": 1.101,
+  "rainbowB/green": 0.963,
+  "rainbowB/blue": 0.963,
+  "rainbowB/violet": 1.299
+ }
+}
