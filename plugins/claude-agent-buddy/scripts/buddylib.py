@@ -141,9 +141,12 @@ def ensure_daemon(cfg=None, wait=3.0):
     cfg = cfg or load_config()
     try:
         st = request("/status", timeout=0.6, cfg=cfg)
-        if st.get("version") == VERSION and st.get("root") == HERE:
+        # Only the version decides: the hooks run the marketplace source copy and
+        # the CLI / MCP server may run the cache copy; comparing paths made two
+        # copies of the same version shut each other down every few seconds.
+        if st.get("version") == VERSION:
             return st
-        # An older plugin copy is still running: replace it.
+        # An older plugin version is still running: replace it.
         try:
             request("/shutdown", {}, timeout=0.6, cfg=cfg)
         except Exception:
