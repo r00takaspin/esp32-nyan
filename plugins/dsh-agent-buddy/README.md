@@ -50,13 +50,28 @@ the same way to recover the CDC port.
 ## Install the bundle
 
 In the GUI: **Settings → Plugins → Install bundle from directory** →
-`plugins/dsh-agent-buddy`. Requires `python3` with `pyserial` on PATH.
+`plugins/dsh-agent-buddy`. Requires `python3` with `pyserial` on PATH (for USB).
+
+### Without the cable: Bluetooth
+
+When no USB port is present, `bridge.py` talks to the board over Bluetooth through
+`buddy-ble`, the CoreBluetooth helper from `plugins/claude-agent-buddy/ble` (built with
+`swiftc` on first use into `~/.config/agent-buddy/bin/`). The board must run the firmware
+with the BLE link service. macOS asks once for Bluetooth access — allow it. Plugging the
+cable in makes the bridge exit and the plugin respawns it on USB. The port setting is a hint:
+if that `usbmodem` is gone, the bridge takes whichever one is there (macOS renames it).
+
+The board counts as connected only while it answers the bridge's pings (every 2.5 s, 7 s
+window); the old sticky `deviceAlive` flag is gone, so approvals fall back to the GUI as soon
+as the board goes away. `/status` reports `via: usb|bluetooth`. One lock file
+(`/tmp/nyan-buddy-bridge.lock`) is shared with the Claude Code plugin for both transports, so
+only one agent drives the board at a time.
 
 ## Config (`cordis.patch.yml`)
 
 | Field | Default | Meaning |
 |---|---|---|
-| `port` | `/dev/cu.usbmodem1101` | USB CDC device of the board |
+| `port` | `/dev/cu.usbmodem1101` | preferred USB CDC device (falls back to any `usbmodem`, then Bluetooth) |
 | `python` | `python3` | Interpreter that runs `bridge.py`; must have `pyserial` |
 | `approvals` | `on` | `on` answers approvals on the device; `off` mirrors and delegates to the GUI |
 | `timeoutMs` | `120000` | How long the device may hold an approval before resolving `unavailable` |

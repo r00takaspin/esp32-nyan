@@ -285,9 +285,13 @@ class Buddy:
         if not exe:
             self.port_state = "missing"
             return
+        # The shared lock covers Bluetooth too: two agents talking to the board
+        # at once would keep overwriting each other's state.
+        take_lock()
         try:
             p = BlePort(exe)
         except OSError as e:
+            release_lock()
             self.error = "buddy-ble: %s" % e
             self.port_state = "missing"
             return
