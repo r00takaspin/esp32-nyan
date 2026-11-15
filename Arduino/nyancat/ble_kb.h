@@ -21,3 +21,8 @@ uint32_t bleKbPasskey();                     // passkey to show (0 = none)
 int  bleKbLastAuth();                        // -1 unknown, 0 failed, 1 ok
 
 void bleKbSetBattery(uint8_t pct);           // HID battery service value
+void bleKbShutdown();
+
+// ---- agent link over BLE (same text protocol as USB CDC) ----
+bool bleLinkReadLine(char *out, size_t n);   // next complete "S|..." line from the host
+void bleLinkSend(const char *line);          // notify one line (no-op without a subscriber)                        // radio off for standby (restart to bring it back)

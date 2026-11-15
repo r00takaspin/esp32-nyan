@@ -29,3 +29,17 @@ int  batPercent();        // 0..100, -1 = unknown
 bool batUsbHost();        // USB data host seen (SOF frames)
 PowerState batPower();
 const char *batPowerName(PowerState p);   // "battery" / "charging" / "full" / "unknown"
+
+// USB host check that does not wait for the 2 s poll: two SOF reads `ms` apart.
+bool batUsbProbe(uint32_t ms = 5);
+
+// ---- discharge log ----
+// One sample every BATLOG_EVERY_MS into RTC memory: survives restarts and
+// standby, not a power-off. Read with S|log, clear with S|logclr.
+#define BATLOG_EVERY_MS (5UL * 60 * 1000)
+#define BATLOG_N        1200          // 1200 x 5 min = ~4 days
+enum : uint16_t { BATLOG_USB = 0x2000, BATLOG_SCREEN = 0x4000, BATLOG_STANDBY = 0x8000 };
+void batLogTick(uint16_t flags);      // call often; records when the interval is due
+uint16_t batLogCount();
+uint16_t batLogAt(uint16_t i);        // 0 = oldest; low 13 bits = mV, high bits = flags
+void batLogClear();

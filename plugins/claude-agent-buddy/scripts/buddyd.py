@@ -14,6 +14,10 @@ owner of /dev/cu.usbmodem*. This daemon is started on demand by the hooks
   * shares /tmp/nyan-buddy-bridge.lock with the DeepSeek bridge and the flashing
     recipe, so only one program talks to the board at a time.
 
+Transport: the USB CDC port when the cable is in, otherwise Bluetooth through
+the buddy-ble helper (same text protocol over the board's BLE link service).
+The cable wins: while on Bluetooth the daemon switches as soon as USB shows up.
+
 HTTP (127.0.0.1:<http_port>, JSON):
   GET  /status
   POST /event    {session, event, state, text}
@@ -26,7 +30,9 @@ HTTP (127.0.0.1:<http_port>, JSON):
 import glob
 import json
 import os
+import select
 import signal
+import subprocess
 import sys
 import threading
 import time
@@ -107,6 +113,43 @@ class Port:
                 os.close(self.fd)
         except Exception:
             pass
+
+
+class BlePort:
+    """The board over Bluetooth: a buddy-ble subprocess speaking lines on stdio."""
+
+    path = "bluetooth"
+
+    def __init__(self, exe):
+        self.proc = subprocess.Popen([exe], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                     stderr=subprocess.DEVNULL, bufsize=0)
+        self.linked = False
+
+    def read(self):
+        r, _, _ = select.select([self.proc.stdout], [], [], 0.2)
+        if not r:
+            return b""
+        data = os.read(self.proc.stdout.fileno(), 4096)
+        if not data:
+            raise OSError("buddy-ble exited (%s)" % self.proc.poll())
+        return data
+
+    def write(self, data):
+        try:
+            self.proc.stdin.write(data)
+            self.proc.stdin.flush()
+        except (BrokenPipeError, ValueError) as e:
+            raise OSError("buddy-ble: %s" % e)
+
+    def close(self):
+        try:
+            self.proc.terminate()
+            self.proc.wait(timeout=2)
+        except Exception:
+            try:
+                self.proc.kill()
+            except Exception:
+                pass
 
 
 def candidate_ports(cfg):
@@ -206,7 +249,7 @@ class Buddy:
         self.lock_pid = None
         ports = candidate_ports(self.cfg)
         if not ports:
-            self.port_state = "missing"
+            self._open_ble()
             return
         for i, path in enumerate(ports):
             try:
@@ -233,6 +276,31 @@ class Buddy:
             self.send("S|ping")
             self.refresh(force=True)
             return
+
+    def _open_ble(self):
+        if self.cfg.get("ble", "auto") == "off":
+            self.port_state = "missing"
+            return
+        exe = bl.ble_helper(log)
+        if not exe:
+            self.port_state = "missing"
+            return
+        try:
+            p = BlePort(exe)
+        except OSError as e:
+            self.error = "buddy-ble: %s" % e
+            self.port_state = "missing"
+            return
+        with self.lock:
+            self.port, self.port_path = p, p.path
+            self.port_state = "open"
+            self.error = ""
+            self.sent = None
+        log("bluetooth link helper started")
+        # Queued by the helper until the board is attached.
+        self.send("S|host|%s" % bl.device_text(self.cfg.get("host_name", "claude"), 14))
+        self.send("S|ping")
+        self.refresh(force=True)
 
     def _probe(self, p, wait=1.5):
         try:
@@ -275,6 +343,11 @@ class Buddy:
     def ping_loop(self):
         while self.running:
             time.sleep(PING_EVERY)
+            if isinstance(self.port, BlePort) and candidate_ports(self.cfg) and not lock_owner():
+                log("USB cable plugged in, leaving bluetooth")
+                with self.lock:
+                    self._drop("switching to USB")
+                continue
             if self.port:
                 self.send("S|ping")
                 # Answers to pings prove the link; an open port that never
@@ -287,6 +360,15 @@ class Buddy:
                 self.shutdown()
 
     def on_line(self, line):
+        if line.startswith("#"):              # buddy-ble status: "#connected <name>" etc.
+            log("ble:", line[1:])
+            if line.startswith("#connected"):
+                with self.lock:
+                    self.sent = None
+                self.send("S|host|%s" % bl.device_text(self.cfg.get("host_name", "claude"), 14))
+                self.send("S|ping")
+                self.refresh(force=True)
+            return
         self.last_rx = time.time()
         p = line.split("|")
         if p[0] == "I":
@@ -420,6 +502,8 @@ class Buddy:
             pass
         elif key == "approve_timeout":
             value = max(5, min(int(value), 280))
+        elif key == "ble" and value in ("auto", "off"):
+            pass
         elif key in ("port", "host_name"):
             value = str(value)
         else:

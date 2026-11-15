@@ -123,3 +123,10 @@ bool bsp_touch_get_coordinates(touch_data_t *touch_data)
     }
     return true;
 }
+// Direct poll (no INT flag), for standby where the INT edge ISR is detached.
+bool bsp_touch_pressed(void)
+{
+    uint8_t data[2] = {0};
+    touch_i2c_read(AXS5106L_ADDR, AXS5106L_TOUCH_DATA_REG, data, 2);
+    return data[1] != 0 && data[1] != 0xFF;
+}

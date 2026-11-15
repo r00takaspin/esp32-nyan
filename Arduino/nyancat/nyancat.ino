@@ -21,6 +21,8 @@
 #include "nyancat_frames.h"
 #include "battery.h"
 #include "buddy_ui.h"
+#include <esp_sleep.h>
+#include <driver/gpio.h>
 
 #if defined(USB_HID_KB)
 #include <USB.h>
@@ -104,6 +106,15 @@ void saveSettings() {
 inline uint16_t blLevel() { return BRI_LEVELS[cfgBri]; }
 
 // ---- screen power ----
+// 160 MHz: a full frame takes ~33 ms, under the fastest animation period (70 ms).
+// Dark screen: nothing to draw, 80 MHz (the lowest the radio allows).
+#define CPU_MHZ_ON   160
+#define CPU_MHZ_DARK 80
+#define STANDBY_AFTER_MS (5UL * 60 * 1000)
+#define STANDBY_CHECK_S  60
+#define STANDBY_WAKE_MAGIC 0x5B7A1E5Bu
+RTC_NOINIT_ATTR static uint32_t standbyWake;
+uint32_t standbyTestAt = 0;   // S|standby: armed test entry time (0 = off)   // skip the boot splash after a standby wake
 uint32_t lastFrame = 0;
 unsigned long lastActivity = 0;
 bool screenOn = true;
@@ -112,6 +123,7 @@ unsigned long lastBlink = 0;
 
 void wakeScreen() {
   if (!screenOn) {
+    setCpuFrequencyMhz(CPU_MHZ_ON);
     gfx->displayOn();          // SLPOUT; GRAM survives sleep, so the last frame is back at once
     ledcWrite(BL_CH, blLevel());
     screenOn = true;
@@ -124,6 +136,7 @@ void sleepScreen() {
   if (screenOn) {
     ledcWrite(BL_CH, 0);
     gfx->displayOff();         // SLPIN: panel driver and its oscillator stop too
+    setCpuFrequencyMhz(CPU_MHZ_DARK);
     screenOn = false;
   }
 }
@@ -423,6 +436,9 @@ void buildModel(UiModel &m) {
 
 // ------------------------- protocol -------------------------
 void sendLine(const char *s) {
+#if !defined(USB_HID_KB)
+  bleLinkSend(s);
+#endif
   if (Serial.availableForWrite() < 64) return;   // never block
   Serial.println(s);
 }
@@ -446,11 +462,12 @@ void sendInfo() {
   char buf[220];
   snprintf(buf, sizeof(buf),
            "I|fw=%s|name=%s|ble=%d|bond=%d|peer=%s|bat=%d|pct=%d|pwr=%s|usb=%d"
-           "|bri=%u|sleep=%u|kb=%s|setup=%d|ui=%s|st=%s|tmp=%d|fms=%lu|scr=%d",
+           "|bri=%u|sleep=%u|kb=%s|setup=%d|ui=%s|st=%s|tmp=%d|fms=%lu|scr=%d|mhz=%lu|log=%u",
            FW_VERSION, bleName, ble, bonds, bond, batMillivolts(), batPercent(),
            batPowerName(batPower()), batUsbHost() ? 1 : 0, cfgBri, SLEEP_OPTIONS[cfgSleep],
            KBN[cfgKb], cfgSetupDone ? 1 : 0, UIN[ui], stateName(st),
-           (int)temperatureRead(), (unsigned long)frameMs, screenOn ? 1 : 0);
+           (int)temperatureRead(), (unsigned long)frameMs, screenOn ? 1 : 0,
+           (unsigned long)getCpuFrequencyMhz(), batLogCount());
   sendLine(buf);
 }
 
@@ -541,6 +558,14 @@ void parseLine(const String &line) {
   if (cmd == "unpair") { forgetPairing(); startWizard(1); sendInfo(); return; }
   if (cmd == "wizard") { startWizard(0); sendInfo(); return; }
   if (cmd == "reboot") { Serial.flush(); delay(50); ESP.restart(); return; }
+  if (cmd == "standby") {   // test hook: S|standby[|delay_s]; unplug USB meanwhile
+    standbyTestAt = millis() + (uint32_t)tok[2].toInt() * 1000UL;
+    if (standbyTestAt == 0) standbyTestAt = 1;
+    sendLine("D|standby armed");
+    return;
+  }
+  if (cmd == "log") { sendLog(); return; }
+  if (cmd == "logclr") { batLogClear(); sendLine("L|n=0"); return; }
   if (cmd == "cancel") {
     // The host resolved the approval elsewhere (terminal dialog, timeout).
     if (st == ST_APPROVE && (tok[2].length() == 0 || tok[2] == approveId)) {
@@ -657,9 +682,7 @@ void onTap(int x, int y) {
 
 // ------------------------- setup / loop -------------------------
 void setup() {
-  // 160 MHz: a full frame takes ~45 ms instead of ~30 ms, still under the
-  // fastest animation period (70 ms), and the chip runs noticeably cooler.
-  setCpuFrequencyMhz(160);
+  setCpuFrequencyMhz(CPU_MHZ_ON);
   // Keep the backlight off during boot: a floating pin lets the panel show
   // uninitialised GRAM noise before the first clean frame.
   pinMode(GFX_BL, OUTPUT);
@@ -715,8 +738,10 @@ void setup() {
   sendLine("E|hello");
   Serial.println("AgentBuddy ready");
 
-  // Boot splash: the keyboard cat, played twice.
-  {
+  // Boot splash: the keyboard cat, played twice (not after a standby wake).
+  bool fromStandby = standbyWake == STANDBY_WAKE_MAGIC;
+  standbyWake = 0;
+  if (!fromStandby) {
     int n = ANIM_COUNT[ANIM_BOOT];
     for (int loop = 0; loop < 2; loop++) {
       for (int i = 0; i < n; i++) {
@@ -731,6 +756,75 @@ void setup() {
   if (!cfgSetupDone) startWizard(0);
 }
 
+// ------------------------- standby -------------------------
+// On battery, dark and idle for STANDBY_AFTER_MS: radio off, light sleep,
+// wake on a tap (touch INT) or when a USB host shows up (checked once a
+// minute), then restart - the cleanest way to bring BLE back. A bonded Mac
+// reconnects by itself within a couple of seconds.
+
+void enterStandby() {
+  sendLine("A|standby");
+  delay(50);                                  // not Serial.flush(): it waits forever without a host
+  sleepScreen();
+#if !defined(USB_HID_KB)
+  bleKbShutdown();
+#endif
+  // Light sleep switches pads to their sleep config by default: the backlight
+  // pin could float high (a frozen frame lit up) and the touch reset / INT
+  // pins stop working. Keep them as they are.
+  ledcDetachPin(GFX_BL);
+  pinMode(GFX_BL, OUTPUT);
+  digitalWrite(GFX_BL, LOW);
+  const int keep[] = {GFX_BL, LCD_RST, TOUCH_RST, TOUCH_INT};
+  for (int pin : keep) gpio_sleep_sel_dis((gpio_num_t)pin);
+  // GPIO47/48 (touch reset / INT) live in the VDD_SPI domain.
+  esp_sleep_pd_config(ESP_PD_DOMAIN_VDDSDIO, ESP_PD_OPTION_ON);
+
+  detachInterrupt(TOUCH_INT);                 // a level wake source must not also be an edge ISR
+  gpio_wakeup_enable((gpio_num_t)TOUCH_INT, GPIO_INTR_LOW_LEVEL);
+  esp_sleep_enable_gpio_wakeup();
+  // Also wake twice a second and ask the touch chip directly, in case INT
+  // pulses are too short to be caught; every STANDBY_CHECK_S check USB + log.
+  // Note: with a USB host attached light sleep never returns (seen on 2.0.14),
+  // which is why standby only starts on battery.
+  esp_sleep_enable_timer_wakeup(500000ULL);
+  uint32_t ticks = 0;
+  for (;;) {
+    esp_light_sleep_start();
+    if (esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_GPIO) break;
+    if (bsp_touch_pressed()) break;
+    if (++ticks % (STANDBY_CHECK_S * 2)) continue;
+    delay(300);                               // let a freshly attached host start sending SOFs
+    if (batUsbProbe(5)) break;
+    batPoll();
+    batLogTick(BATLOG_STANDBY);
+  }
+  standbyWake = STANDBY_WAKE_MAGIC;
+  ESP.restart();
+}
+
+// Lines bigger than the TX ring would be dropped by sendLine(): wait for room
+// (bounded), used only for the on-request log dump.
+void sendLineWait(const char *s) {
+  uint32_t t0 = millis();
+  while (Serial.availableForWrite() < (int)strlen(s) + 2 && millis() - t0 < 300) delay(2);
+  sendLine(s);
+}
+
+void sendLog() {
+  uint16_t n = batLogCount();
+  char buf[200];
+  snprintf(buf, sizeof(buf), "L|n=%u|every=%lu", n, BATLOG_EVERY_MS / 1000);
+  sendLineWait(buf);
+  for (uint16_t i = 0; i < n;) {
+    int len = snprintf(buf, sizeof(buf), "L|%u|", i);
+    for (int k = 0; k < 30 && i < n; k++, i++)
+      len += snprintf(buf + len, sizeof(buf) - len, k ? ",%u" : "%u", batLogAt(i));
+    sendLineWait(buf);
+  }
+  sendLineWait("L|end");
+}
+
 String rxLine;
 
 void loop() {
@@ -743,6 +837,13 @@ void loop() {
       if (rxLine.length() < 220) rxLine += c;
     }
   }
+
+#if !defined(USB_HID_KB)
+  {
+    char bl[232];
+    while (bleLinkReadLine(bl, sizeof(bl))) parseLine(String(bl));
+  }
+#endif
 
   // Tap = first touch report after >180 ms of silence (the AXS5106L reports
   // continuously while a finger is down), so holding a finger never repeats.
@@ -767,6 +868,13 @@ void loop() {
   if (st == ST_IDLE && ui == UI_NONE && screenOn && sleepS &&
       millis() - lastActivity >= sleepS * 1000UL) {
     sleepScreen();
+  }
+
+  batLogTick((screenOn ? BATLOG_SCREEN : 0));
+  if (standbyTestAt && (int32_t)(millis() - standbyTestAt) >= 0) { standbyTestAt = 0; enterStandby(); }
+  if (!screenOn && st == ST_IDLE && ui == UI_NONE && batPower() == PWR_BATTERY && !hostLinked() &&
+      millis() - lastActivity >= STANDBY_AFTER_MS) {
+    enterStandby();
   }
 
   // Status / settings close by themselves; the wizard waits for the user.

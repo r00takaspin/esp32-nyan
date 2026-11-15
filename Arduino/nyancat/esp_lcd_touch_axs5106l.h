@@ -27,3 +27,4 @@ void bsp_touch_read(void);
 bool bsp_touch_get_coordinates(touch_data_t *touch_data);
 // bool touch_init(TwoWire *touch_i2c, int tp_rst, int tp_int);
 void bsp_touch_init(TwoWire *touch_i2c,int tp_rst, int tp_int, uint16_t rotation, uint16_t width, uint16_t height);
+bool bsp_touch_pressed(void);

@@ -6,6 +6,8 @@
 #include <BLE2902.h>
 #include <BLESecurity.h>
 #include <esp_gap_ble_api.h>
+#include <esp_bt.h>
+#include <esp_bt_main.h>
 
 static BLEServer *s_srv = nullptr;
 static BLEHIDDevice *s_hid = nullptr;
@@ -17,6 +19,16 @@ static volatile uint32_t s_passkey = 0;
 static volatile int s_lastAuth = -1;
 static uint8_t s_battery = 100;
 
+// Agent link over BLE: a Nordic-UART-style service carrying the same text
+// lines as USB CDC (host writes "S|..." to RX, board notifies TX lines).
+#define LINK_SVC_UUID "6e400001-b5a3-f393-e0a9-e50e24dcca9e"
+#define LINK_RX_UUID  "6e400002-b5a3-f393-e0a9-e50e24dcca9e"
+#define LINK_TX_UUID  "6e400003-b5a3-f393-e0a9-e50e24dcca9e"
+static BLECharacteristic *s_linkTx = nullptr;
+static portMUX_TYPE s_rxMux = portMUX_INITIALIZER_UNLOCKED;
+static char s_rx[512];
+static volatile uint16_t s_rxLen = 0;
+
 // Standard boot-keyboard HID report descriptor (report id 1).
 static const uint8_t REPORT_MAP[] = {
   0x05, 0x01, 0x09, 0x06, 0xA1, 0x01, 0x85, 0x01,
@@ -24,6 +36,26 @@ static const uint8_t REPORT_MAP[] = {
   0x95, 0x01, 0x75, 0x08, 0x81, 0x01,
   0x95, 0x06, 0x75, 0x08, 0x15, 0x00, 0x25, 0x65, 0x05, 0x07, 0x19, 0x00, 0x29, 0x65, 0x81, 0x00,
   0xC0
+};
+
+// macOS Bluetooth Settings only lists new BLE HID devices stronger than
+// -60 dBm RSSI, so advertise at +9 dBm until a computer has bonded; a bonded
+// Mac reconnects by itself and +3 dBm is plenty.
+static void advPowerForBonds() {
+  int n = esp_ble_get_bond_device_num();
+  BLEDevice::setPower(n > 0 ? ESP_PWR_LVL_P3 : ESP_PWR_LVL_P9, ESP_BLE_PWR_TYPE_ADV);
+}
+
+// Runs in the BT task: only buffer here, lines are parsed in loop().
+class LinkRxCb : public BLECharacteristicCallbacks {
+  void onWrite(BLECharacteristic *c) override {
+    std::string v = c->getValue();
+    portENTER_CRITICAL(&s_rxMux);
+    for (char ch : v) {
+      if (s_rxLen < sizeof(s_rx) - 1) s_rx[s_rxLen++] = ch;
+    }
+    portEXIT_CRITICAL(&s_rxMux);
+  }
 };
 
 class SrvCb : public BLEServerCallbacks {
@@ -49,6 +81,7 @@ class SecCb : public BLESecurityCallbacks {
   void onAuthenticationComplete(esp_ble_auth_cmpl_t cmpl) override {
     s_lastAuth = cmpl.success ? 1 : 0;
     s_passkey = 0;
+    if (cmpl.success) advPowerForBonds();
   }
 };
 #endif
@@ -73,10 +106,9 @@ static uint8_t asciiToHid(uint8_t c, uint8_t *mod) {
 void bleKbBegin(const char *name) {
   if (s_inited) return;
   BLEDevice::init(name);
-  // Default is +3 dBm. macOS Bluetooth Settings only lists new BLE HID devices
-  // stronger than -60 dBm RSSI, and at +3 dBm the board sat at -58..-65 a desk away.
-  BLEDevice::setPower(ESP_PWR_LVL_P9, ESP_BLE_PWR_TYPE_ADV);
-  BLEDevice::setPower(ESP_PWR_LVL_P9, ESP_BLE_PWR_TYPE_DEFAULT);
+  // The connection itself runs at the default +3 dBm (the Mac sits a desk away).
+  BLEDevice::setPower(ESP_PWR_LVL_P3, ESP_BLE_PWR_TYPE_DEFAULT);
+  advPowerForBonds();
   s_srv = BLEDevice::createServer();
   s_srv->setCallbacks(new SrvCb());
 
@@ -93,6 +125,14 @@ void bleKbBegin(const char *name) {
   s_input = s_hid->inputReport(1);
   s_hid->startServices();
   s_hid->setBatteryLevel(s_battery);
+
+  BLEService *link = s_srv->createService(LINK_SVC_UUID);
+  BLECharacteristic *rx = link->createCharacteristic(
+      LINK_RX_UUID, BLECharacteristic::PROPERTY_WRITE | BLECharacteristic::PROPERTY_WRITE_NR);
+  rx->setCallbacks(new LinkRxCb());
+  s_linkTx = link->createCharacteristic(LINK_TX_UUID, BLECharacteristic::PROPERTY_NOTIFY);
+  s_linkTx->addDescriptor(new BLE2902());
+  link->start();
 
 #if ESP_ARDUINO_VERSION < ESP_ARDUINO_VERSION_VAL(3, 0, 0)
   BLEDevice::setSecurityCallbacks(new SecCb());
@@ -190,6 +230,7 @@ void bleKbForgetAll() {
   }
   s_lastAuth = -1;
   s_passkey = 0;
+  advPowerForBonds();
   if (s_connected && s_srv) s_srv->disconnect(s_srv->getConnId());  // onDisconnect re-advertises
   else BLEDevice::startAdvertising();
 }
@@ -203,4 +244,55 @@ void bleKbSetBattery(uint8_t pct) {
   // In core 2.0.14 this also notify()s; that is a no-op without a peer
   // (BLECharacteristic::notify checks getConnectedCount()).
   if (s_inited && s_hid) s_hid->setBatteryLevel(pct);
+}
+
+void bleKbShutdown() {
+  if (!s_inited) return;
+  // The radio must be off before light sleep: the 2.0.14 core is built
+  // without BT modem sleep, so the controller cannot sleep on its own.
+  // There is no way back short of a restart, which is how standby wakes.
+  s_inited = false;
+  s_connected = false;
+  esp_bluedroid_disable();
+  esp_bluedroid_deinit();
+  esp_bt_controller_disable();
+}
+
+// ---------------- agent link ----------------
+bool bleLinkReadLine(char *out, size_t n) {
+  if (!out || n < 2) return false;
+  bool got = false;
+  portENTER_CRITICAL(&s_rxMux);
+  for (uint16_t i = 0; i < s_rxLen; i++) {
+    if (s_rx[i] != '\n') continue;
+    size_t len = i < n - 1 ? i : n - 1;
+    memcpy(out, s_rx, len);
+    out[len] = 0;
+    if (len && out[len - 1] == '\r') out[len - 1] = 0;
+    memmove(s_rx, s_rx + i + 1, s_rxLen - i - 1);
+    s_rxLen -= i + 1;
+    got = true;
+    break;
+  }
+  if (!got && s_rxLen == sizeof(s_rx) - 1) s_rxLen = 0;   // no newline in a full buffer: drop junk
+  portEXIT_CRITICAL(&s_rxMux);
+  return got;
+}
+
+void bleLinkSend(const char *line) {
+  if (!s_inited || !s_connected || !s_linkTx || !line) return;
+  BLE2902 *cccd = (BLE2902 *)s_linkTx->getDescriptorByUUID((uint16_t)0x2902);
+  if (!cccd || !cccd->getNotifications()) return;     // nobody listening
+  uint16_t mtu = s_srv->getPeerMTU(s_srv->getConnId());
+  size_t chunk = (mtu > 23 ? mtu : 23) - 3;
+  if (chunk > 180) chunk = 180;
+  size_t len = strlen(line);
+  char buf[184];
+  // The line plus its newline, cut into notification-sized pieces.
+  for (size_t off = 0; off <= len;) {
+    size_t k = 0;
+    while (k < chunk && off <= len) buf[k++] = off < len ? line[off++] : (off++, '\n');
+    s_linkTx->setValue((uint8_t *)buf, k);
+    s_linkTx->notify();
+  }
 }

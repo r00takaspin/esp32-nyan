@@ -3,15 +3,17 @@
 Only the standard library is used (Python 3.8+), so hooks start fast with the
 system python3 and nothing has to be pip-installed.
 """
+import hashlib
 import json
 import os
+import shutil
 import subprocess
 import sys
 import time
 import urllib.error
 import urllib.request
 
-VERSION = "1.0.0"
+VERSION = "1.1.0"
 HERE = os.path.dirname(os.path.abspath(__file__))
 
 CONFIG_DIR = os.path.expanduser(os.environ.get("AGENT_BUDDY_HOME", "~/.config/agent-buddy"))
@@ -28,6 +30,7 @@ DEFAULTS = {
     "approvals": "device",       # "device": answer on the board, "terminal": only show
     "approve_timeout": 45,       # seconds the board may hold a permission prompt
     "host_name": "claude",
+    "ble": "auto",               # "auto": Bluetooth link when no USB cable, "off": USB only
 }
 
 # Tools whose permission prompt is really a question for the human: the hook
@@ -65,6 +68,50 @@ def save_config(updates):
     with open(tmp, "w") as f:
         json.dump(cur, f, indent=2)
     os.replace(tmp, CONFIG_PATH)
+
+
+# --------------------------------------------------------------- BLE helper
+BLE_SRC_DIR = os.path.join(os.path.dirname(HERE), "ble")
+
+
+def ble_helper(log=None):
+    """Path to the compiled buddy-ble bridge, building it on first use.
+
+    Returns None where BLE is unavailable (not macOS, no swiftc, build failed).
+    The binary name carries a hash of the sources, so a plugin update rebuilds it.
+    """
+    if sys.platform != "darwin":
+        return None
+    src = os.path.join(BLE_SRC_DIR, "buddy-ble.swift")
+    plist = os.path.join(BLE_SRC_DIR, "Info.plist")
+    try:
+        h = hashlib.sha1(open(src, "rb").read() + open(plist, "rb").read()).hexdigest()[:10]
+    except OSError:
+        return None
+    out = os.path.join(CONFIG_DIR, "bin", "buddy-ble-" + h)
+    if os.path.exists(out):
+        return out
+    swiftc = shutil.which("swiftc") or "/usr/bin/swiftc"
+    if not os.path.exists(swiftc):
+        return None
+    os.makedirs(os.path.dirname(out), exist_ok=True)
+    if log:
+        log("building BLE helper", out)
+    try:
+        r = subprocess.run([swiftc, "-O", "-o", out + ".tmp", src,
+                            "-Xlinker", "-sectcreate", "-Xlinker", "__TEXT",
+                            "-Xlinker", "__info_plist", "-Xlinker", plist],
+                           capture_output=True, text=True, timeout=300)
+    except (OSError, subprocess.TimeoutExpired) as e:
+        if log:
+            log("BLE helper build failed:", e)
+        return None
+    if r.returncode != 0:
+        if log:
+            log("BLE helper build failed:", (r.stderr or r.stdout)[-400:])
+        return None
+    os.replace(out + ".tmp", out)
+    return out
 
 
 # --------------------------------------------------------------- device text
@@ -136,15 +183,22 @@ def _spawn_daemon():
                      start_new_session=True, close_fds=True)
 
 
+def _ver(v):
+    try:
+        return tuple(int(x) for x in str(v).split("."))
+    except ValueError:
+        return (0,)
+
+
 def ensure_daemon(cfg=None, wait=3.0):
     """Return the daemon's /status, starting (or upgrading) it if needed."""
     cfg = cfg or load_config()
     try:
         st = request("/status", timeout=0.6, cfg=cfg)
-        # Only the version decides: the hooks run the marketplace source copy and
-        # the CLI / MCP server may run the cache copy; comparing paths made two
-        # copies of the same version shut each other down every few seconds.
-        if st.get("version") == VERSION:
+        # Only an older daemon is replaced. The hooks run the marketplace source
+        # copy and the CLI / MCP server may run the cache copy: comparing paths
+        # (or "not equal" versions) made two copies shut each other down.
+        if _ver(st.get("version")) >= _ver(VERSION):
             return st
         # An older plugin version is still running: replace it.
         try:

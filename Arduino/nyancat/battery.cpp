@@ -98,3 +98,57 @@ const char *batPowerName(PowerState p) {
     default:           return "unknown";
   }
 }
+
+bool batUsbProbe(uint32_t ms) {
+#if HAVE_SOF
+  uint32_t a = REG_READ(USB_SERIAL_JTAG_FRAM_NUM_REG) & 0x7FF;
+  delay(ms);
+  return (REG_READ(USB_SERIAL_JTAG_FRAM_NUM_REG) & 0x7FF) != a;
+#else
+  return false;
+#endif
+}
+
+// ---------------- discharge log ----------------
+#define BATLOG_MAGIC 0xBA7105A1u
+struct BatLog {
+  uint32_t magic;
+  uint16_t head, count;
+  uint16_t s[BATLOG_N];
+};
+RTC_NOINIT_ATTR static BatLog s_log;
+static uint32_t s_logLast = 0;
+static bool s_logChecked = false;
+
+static void logCheck() {
+  if (s_logChecked) return;
+  s_logChecked = true;
+  if (s_log.magic != BATLOG_MAGIC || s_log.head >= BATLOG_N || s_log.count > BATLOG_N) batLogClear();
+}
+
+void batLogClear() {
+  s_log.magic = BATLOG_MAGIC;
+  s_log.head = 0;
+  s_log.count = 0;
+  s_logChecked = true;
+}
+
+void batLogTick(uint16_t flags) {
+  logCheck();
+  uint32_t now = millis();
+  if (s_logLast && now - s_logLast < BATLOG_EVERY_MS) return;
+  if (s_mv == 0) return;                     // nothing measured yet
+  s_logLast = now ? now : 1;
+  uint16_t v = (uint16_t)(s_mv > 0x1FFF ? 0x1FFF : s_mv) | flags | (s_usb ? BATLOG_USB : 0);
+  s_log.s[s_log.head] = v;
+  s_log.head = (s_log.head + 1) % BATLOG_N;
+  if (s_log.count < BATLOG_N) s_log.count++;
+}
+
+uint16_t batLogCount() { logCheck(); return s_log.count; }
+
+uint16_t batLogAt(uint16_t i) {
+  logCheck();
+  if (i >= s_log.count) return 0;
+  return s_log.s[(s_log.head + BATLOG_N - s_log.count + i) % BATLOG_N];
+}
