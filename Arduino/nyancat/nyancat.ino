@@ -1,18 +1,26 @@
-// DSH Agent Buddy for Waveshare ESP32-S3-Touch-LCD-1.47
-// ------------------------------------------------------
-// The device is a desk-side "buddy" for the DeepSeek Harness:
+// DSH / Claude Agent Buddy for Waveshare ESP32-S3-Touch-LCD-1.47
+// ---------------------------------------------------------------
+// The device is a desk-side "buddy" for an AI agent (DeepSeek Harness or
+// Claude Code):
 //   * per-state cat animations (idle / thinking / approved / rejected)
 //   * a pending tool approval with big touch YES / NO buttons
+//   * first-run pairing wizard, status screen and settings (tap the cat)
 //   * a tiny line protocol over USB CDC (115200):
 //       Host -> Dev:  S|idle  S|think  S|tool|<text>  S|approve|<id>|<text>  S|error|<text>
-//       Dev -> Host:  E|hello  E|approve|<id>|<1|0>  A|<state>
+//                     S|ping  S|info  S|host|<name>  S|cfg|<key>|<value>
+//                     S|unpair  S|wizard  S|cancel|<id>  S|reboot
+//       Dev -> Host:  E|hello  E|approve|<id>|<1|0>  A|<state>  T|<x>|<y>
+//                     I|fw=..|ble=..|bond=..|bat=..|pct=..|pwr=..|...   (reply to ping/info/cfg)
 //   * a pluggable keyboard backend (BLE HID by default, USB HID with -DUSB_HID_KB).
 
 #include <Arduino_GFX_Library.h>
 #include <Wire.h>
+#include <Preferences.h>
 #include "esp_lcd_touch_axs5106l.h"
 #include "nyan_anims.h"
 #include "nyancat_frames.h"
+#include "battery.h"
+#include "buddy_ui.h"
 
 #if defined(USB_HID_KB)
 #include <USB.h>
@@ -29,6 +37,16 @@ USBHIDKeyboard usbKeyboard;
 #define TOUCH_SCL 41
 #define TOUCH_RST 47
 #define TOUCH_INT 48
+
+// LEDC backlight: core 3.x uses pin-based ledcAttach/ledcWrite, core 2.x uses
+// channel-based ledcSetup/ledcAttachPin/ledcWrite. This shim keeps both working.
+#if ESP_ARDUINO_VERSION >= ESP_ARDUINO_VERSION_VAL(3, 0, 0)
+#define BL_CH       GFX_BL
+#define BL_BEGIN()  do { ledcAttach(GFX_BL, 5000, 10); } while (0)
+#else
+#define BL_CH       0
+#define BL_BEGIN()  do { ledcSetup(0, 5000, 10); ledcAttachPin(GFX_BL, 0); } while (0)
+#endif
 
 // ---- display ----
 Arduino_DataBus *bus = new Arduino_ESP32SPI(45 /* DC */, 21 /* CS */, 38 /* SCK */, 39 /* MOSI */);
@@ -50,12 +68,42 @@ Arduino_Canvas *canvas = new Arduino_Canvas(ANIM_W, ANIM_H, gfx, 0, 0, 0);
 
 enum St { ST_IDLE, ST_THINK, ST_TOOL, ST_APPROVE, ST_ERROR, ST_APPROVED, ST_REJECTED };
 St st = ST_IDLE;
+St afterReaction = ST_THINK;    // where APPROVED / REJECTED go when the reaction ends
 char stateText[180] = "";
 char approveId[48] = "";
 
-#define BL_LEVEL 460            // ~45% backlight duty (0..1023)
-#define IDLE_SLEEP_MS 10000UL   // screen off after 10 s in idle
+// ---- persistent settings (NVS "buddy") ----
+static const uint16_t BRI_LEVELS[BRI_COUNT] = {60, 150, 280, 450, 650};  // 280 = old BL_LEVEL
+Preferences prefs;
+uint8_t cfgBri = 2;           // index into BRI_LEVELS
+uint8_t cfgSleep = 1;         // index into SLEEP_OPTIONS (10 s)
+uint8_t cfgKb = KB_AUTO;      // y/n keystrokes on approve taps
+bool cfgSetupDone = false;
 
+void loadSettings() {
+  prefs.begin("buddy", true);
+  cfgBri = prefs.getUChar("bri", 2);
+  cfgSleep = prefs.getUChar("sleep", 1);
+  cfgKb = prefs.getUChar("kb", KB_AUTO);
+  cfgSetupDone = prefs.getBool("setup", false);
+  prefs.end();
+  if (cfgBri >= BRI_COUNT) cfgBri = 2;
+  if (cfgSleep >= SLEEP_COUNT) cfgSleep = 1;
+  if (cfgKb > KB_ALWAYS) cfgKb = KB_AUTO;
+}
+
+void saveSettings() {
+  prefs.begin("buddy", false);
+  prefs.putUChar("bri", cfgBri);
+  prefs.putUChar("sleep", cfgSleep);
+  prefs.putUChar("kb", cfgKb);
+  prefs.putBool("setup", cfgSetupDone);
+  prefs.end();
+}
+
+inline uint16_t blLevel() { return BRI_LEVELS[cfgBri]; }
+
+// ---- screen power ----
 unsigned long lastActivity = 0;
 bool screenOn = true;
 bool blinkOn = false;
@@ -63,7 +111,7 @@ unsigned long lastBlink = 0;
 
 void wakeScreen() {
   if (!screenOn) {
-    ledcWrite(GFX_BL, BL_LEVEL);
+    ledcWrite(BL_CH, blLevel());
     screenOn = true;
   }
   lastActivity = millis();
@@ -71,16 +119,34 @@ void wakeScreen() {
 
 void sleepScreen() {
   if (screenOn) {
-    ledcWrite(GFX_BL, 0);
+    ledcWrite(BL_CH, 0);
     screenOn = false;
   }
 }
+
+// ---- UI overlay state ----
+UiScreen ui = UI_NONE;
+UiScreen uiResume = UI_NONE;     // wizard paused by an approval
+uint8_t wizPage = 0;
+uint8_t kbTest = 0;
+uint32_t uiLastTouch = 0;
+uint32_t uiLastDraw = 0;
+bool uiDirty = true;
+#define UI_AUTOCLOSE_MS 30000UL  // status / settings close themselves
+
+// ---- agent link (USB host) ----
+uint32_t lastHostRx = 0;
+char hostName[16] = "agent";
+#define HOST_LINK_MS 15000UL
+inline bool hostLinked() { return lastHostRx && millis() - lastHostRx < HOST_LINK_MS; }
+
+char bleName[24] = "AgentBuddy";
 
 int animIdx = 0;
 uint32_t lastFrame = 0;
 uint32_t reactionUntil = 0;
 bool dirty = true;
-uint32_t lastTouch = 0;
+uint32_t lastTouchSeen = 0;
 
 touch_data_t td;
 
@@ -90,6 +156,14 @@ void kbRaw(uint8_t key) {
   usbKeyboard.write(key);
 #else
   bleKbKey(key);
+#endif
+}
+
+bool kbLinked() {
+#if defined(USB_HID_KB)
+  return true;
+#else
+  return bleKbConnected();
 #endif
 }
 
@@ -141,8 +215,6 @@ void lcd_reg_init(void) {
 }
 
 // ------------------------- rendering -------------------------
-void drawWrapped(int x, int y, int maxW, const char *s, uint16_t col, int sz, int lh);
-
 void drawAnimFrame(int anim, int idx) {
   uint16_t *fb = canvas->getFramebuffer();
   if (!fb) return;
@@ -231,29 +303,6 @@ void drawStars(uint32_t f) {
   }
 }
 
-void drawScene() {
-  if (st == ST_THINK || st == ST_TOOL) {
-    drawNyanFrame(animIdx % NYAN_FRAMES);
-    animIdx = (animIdx + 1) % NYAN_FRAMES;
-  } else {
-    int anim = animForState(st);
-    int n = ANIM_COUNT[anim];
-    if (animIdx >= n) animIdx = 0;
-    drawAnimFrame(anim, animIdx);
-    drawStars(animIdx);
-    animIdx = (animIdx + 1) % n;
-  }
-
-  if (st == ST_TOOL) {
-    canvas->fillRect(0, 150, ANIM_W, 22, C_BLACK);
-    drawWrapped(6, 155, 308, stateText, C_AMBER, 1, 9);
-  } else if (st == ST_ERROR) {
-    canvas->fillRect(0, 150, ANIM_W, 22, C_BLACK);
-    drawWrapped(6, 155, 308, stateText, C_RED, 1, 9);
-  }
-}
-
-// word-wrapped text using the built-in 5x7 font
 void drawWrapped(int x, int y, int maxW, const char *s, uint16_t col, int sz, int lh) {
   canvas->setTextColor(col);
   canvas->setTextSize(sz);
@@ -274,6 +323,37 @@ void drawWrapped(int x, int y, int maxW, const char *s, uint16_t col, int sz, in
   }
 }
 
+void drawScene() {
+  if (st == ST_THINK || st == ST_TOOL) {
+    drawNyanFrame(animIdx % NYAN_FRAMES);
+    animIdx = (animIdx + 1) % NYAN_FRAMES;
+  } else {
+    int anim = animForState(st);
+    int n = ANIM_COUNT[anim];
+    if (animIdx >= n) animIdx = 0;
+    drawAnimFrame(anim, animIdx);
+    drawStars(animIdx);
+    animIdx = (animIdx + 1) % n;
+  }
+
+  if (st == ST_TOOL) {
+    canvas->fillRect(0, 150, ANIM_W, 22, C_BLACK);
+    drawWrapped(6, 155, 308, stateText, C_AMBER, 1, 9);
+  } else if (st == ST_ERROR) {
+    canvas->fillRect(0, 150, ANIM_W, 22, C_BLACK);
+    drawWrapped(6, 155, 308, stateText, C_RED, 1, 9);
+  }
+
+  // Battery hint over the cat: only when it matters (charging or low).
+  PowerState pw = batPower();
+  int pct = batPercent();
+  bool low = pw == PWR_BATTERY && pct >= 0 && pct <= 15;
+  if (pw == PWR_CHARGING || low) {
+    canvas->fillRect(284, 3, 32, 15, C_BLACK);
+    uiBatteryIcon(canvas, 287, 5, pct, pw, (millis() / 600) & 1);
+  }
+}
+
 void drawApprove() {
   canvas->fillScreen(C_PANEL);
   // Alternating red/green frame: the visual "LED" alert for a pending approval.
@@ -287,6 +367,11 @@ void drawApprove() {
   canvas->setTextSize(1);
   canvas->setCursor(12, 11);
   canvas->print("APPROVE TOOL CALL?");
+  if (hostName[0] && hostLinked()) {
+    canvas->setTextColor(C565(130, 138, 160));
+    canvas->setCursor(308 - 6 * (int)strlen(hostName), 11);
+    canvas->print(hostName);
+  }
   drawWrapped(12, 23, 296, stateText, C_WHITE, 1, 10);
   canvas->fillRoundRect(14, 100, 140, 62, 12, C_GREEN);
   canvas->fillRoundRect(166, 100, 140, 62, 12, C_RED);
@@ -298,6 +383,40 @@ void drawApprove() {
   canvas->print("NO");
 }
 
+// ------------------------- UI model -------------------------
+const char *stateName(St s) {
+  return (s == ST_IDLE) ? "idle" : (s == ST_THINK) ? "think"
+       : (s == ST_TOOL) ? "tool" : (s == ST_APPROVE) ? "approve"
+       : (s == ST_APPROVED) ? "approved" : (s == ST_REJECTED) ? "rejected" : "error";
+}
+
+void buildModel(UiModel &m) {
+  memset(&m, 0, sizeof(m));
+  m.batMv = batMillivolts();
+  m.batPct = batPercent();
+  m.power = batPower();
+#if !defined(USB_HID_KB)
+  m.bleConnected = bleKbConnected();
+  m.bondCount = bleKbBondCount();
+  bleKbBondAddr(m.bondAddr, sizeof(m.bondAddr));
+  if (!m.bondAddr[0]) bleKbPeerAddr(m.bondAddr, sizeof(m.bondAddr));
+  m.passkey = bleKbPasskey();
+#else
+  m.bleConnected = true;
+  m.bondCount = 1;
+#endif
+  strncpy(m.bleName, bleName, sizeof(m.bleName) - 1);
+  m.hostLinked = hostLinked();
+  strncpy(m.hostName, hostName, sizeof(m.hostName) - 1);
+  m.agentState = stateName(st);
+  m.brightness = cfgBri;
+  m.sleepIdx = cfgSleep;
+  m.kbMode = cfgKb;
+  m.wizPage = wizPage;
+  m.kbTest = kbTest;
+  m.blink = (millis() / 500) & 1;
+}
+
 // ------------------------- protocol -------------------------
 void sendLine(const char *s) {
   if (Serial.availableForWrite() < 64) return;   // never block
@@ -307,6 +426,26 @@ void sendLine(const char *s) {
 void sendApprove(const char *id, int ok) {
   char buf[96];
   snprintf(buf, sizeof(buf), "E|approve|%s|%d", id, ok);
+  sendLine(buf);
+}
+
+void sendInfo() {
+  char bond[20] = "";
+  int bonds = 0, ble = 0;
+#if !defined(USB_HID_KB)
+  bonds = bleKbBondCount();
+  ble = bleKbConnected() ? 1 : 0;
+  bleKbBondAddr(bond, sizeof(bond));
+#endif
+  static const char *UIN[] = {"none", "wizard", "status", "settings", "confirm"};
+  static const char *KBN[] = {"off", "auto", "always"};
+  char buf[220];
+  snprintf(buf, sizeof(buf),
+           "I|fw=%s|name=%s|ble=%d|bond=%d|peer=%s|bat=%d|pct=%d|pwr=%s|usb=%d"
+           "|bri=%u|sleep=%u|kb=%s|setup=%d|ui=%s|st=%s",
+           FW_VERSION, bleName, ble, bonds, bond, batMillivolts(), batPercent(),
+           batPowerName(batPower()), batUsbHost() ? 1 : 0, cfgBri, SLEEP_OPTIONS[cfgSleep],
+           KBN[cfgKb], cfgSetupDone ? 1 : 0, UIN[ui], stateName(st));
   sendLine(buf);
 }
 
@@ -323,28 +462,101 @@ void applyState(St s, const char *text) {
   if (s != ST_IDLE) wakeScreen();
   else if (prev != ST_IDLE) lastActivity = millis();
 
-  const char *name = (s == ST_IDLE) ? "idle" : (s == ST_THINK) ? "think"
-                   : (s == ST_TOOL) ? "tool" : (s == ST_APPROVE) ? "approve"
-                   : (s == ST_APPROVED) ? "approved" : (s == ST_REJECTED) ? "rejected" : "error";
   char a[28];
-  snprintf(a, sizeof(a), "A|%s", name);
+  snprintf(a, sizeof(a), "A|%s", stateName(s));
   sendLine(a);
+}
+
+void openUi(UiScreen s) {
+  ui = s;
+  uiDirty = true;
+  uiLastTouch = millis();
+  wakeScreen();
+  if (s == UI_NONE) { dirty = true; lastFrame = 0; }
+}
+
+void startWizard(uint8_t page) {
+  wizPage = page;
+  kbTest = 0;
+  openUi(UI_WIZARD);
+}
+
+void forgetPairing() {
+#if !defined(USB_HID_KB)
+  bleKbForgetAll();
+#endif
+}
+
+void applyCfg(const String &key, const String &val) {
+  if (key == "bri") {
+    int v = val.toInt();
+    if (v >= 0 && v < BRI_COUNT) cfgBri = v;
+    if (screenOn) ledcWrite(BL_CH, blLevel());
+  } else if (key == "sleep") {
+    int v = val.toInt(), best = 0;
+    for (int i = 0; i < SLEEP_COUNT; i++)   // nearest option, 0 = never
+      if (abs((int)SLEEP_OPTIONS[i] - v) < abs((int)SLEEP_OPTIONS[best] - v)) best = i;
+    cfgSleep = best;
+  } else if (key == "kb") {
+    cfgKb = val == "off" ? KB_OFF : val == "always" ? KB_ALWAYS : KB_AUTO;
+  } else if (key == "setup") {
+    cfgSetupDone = val.toInt() != 0;
+    if (!cfgSetupDone) startWizard(0);
+  } else {
+    return;
+  }
+  saveSettings();
+  uiDirty = true;
 }
 
 void parseLine(const String &line) {
   String tok[5];
   int n = 0, start = 0;
   for (int i = 0; i <= (int)line.length() && n < 5; i++) {
-    if (i == (int)line.length() || line[i] == '|') {
+    if (i == (int)line.length() || (line[i] == '|' && n < 4)) {
       tok[n++] = line.substring(start, i);
       start = i + 1;
     }
   }
   if (n < 2 || tok[0] != "S") return;
+  lastHostRx = millis();
+  if (lastHostRx == 0) lastHostRx = 1;
   String cmd = tok[1];
+
+  // ---- control commands (never change the agent state) ----
+  if (cmd == "ping" || cmd == "info") { sendInfo(); return; }
+  if (cmd == "host") {
+    strncpy(hostName, tok[2].c_str(), sizeof(hostName) - 1);
+    hostName[sizeof(hostName) - 1] = 0;
+    uiDirty = true;
+    sendInfo();
+    return;
+  }
+  if (cmd == "cfg") { applyCfg(tok[2], tok[3]); sendInfo(); return; }
+  if (cmd == "unpair") { forgetPairing(); startWizard(1); sendInfo(); return; }
+  if (cmd == "wizard") { startWizard(0); sendInfo(); return; }
+  if (cmd == "reboot") { Serial.flush(); delay(50); ESP.restart(); return; }
+  if (cmd == "cancel") {
+    // The host resolved the approval elsewhere (terminal dialog, timeout).
+    if (st == ST_APPROVE && (tok[2].length() == 0 || tok[2] == approveId)) {
+      approveId[0] = 0;
+      applyState(ST_THINK, "");
+      if (uiResume != UI_NONE) { openUi(uiResume); uiResume = UI_NONE; }
+    }
+    return;
+  }
+
+  // ---- agent state ----
   // Protect the approved/rejected reaction window from late status updates.
   if ((st == ST_APPROVED || st == ST_REJECTED) && millis() < reactionUntil
       && (cmd == "think" || cmd == "idle" || cmd == "tool")) return;
+  // A state update over a pending approval means the host gave up on it
+  // (the DSH plugin does this when it falls back to its GUI): drop it.
+  if (st == ST_APPROVE && (cmd == "think" || cmd == "idle" || cmd == "tool")) {
+    approveId[0] = 0;
+    if (uiResume != UI_NONE) { openUi(uiResume); uiResume = UI_NONE; }
+  }
+
   if (cmd == "idle")       applyState(ST_IDLE, "");
   else if (cmd == "think") applyState(ST_THINK, "");
   else if (cmd == "tool")  applyState(ST_TOOL, tok[2].c_str());
@@ -352,27 +564,90 @@ void parseLine(const String &line) {
   else if (cmd == "approve") {
     strncpy(approveId, tok[2].c_str(), sizeof(approveId) - 1);
     approveId[sizeof(approveId) - 1] = 0;
+    if (ui == UI_WIZARD) uiResume = UI_WIZARD;   // come back after the answer
+    if (ui != UI_NONE) ui = UI_NONE;
+    afterReaction = ST_THINK;
     applyState(ST_APPROVE, tok[3].c_str());
   }
 }
 
 // ------------------------- touch -------------------------
-void handleTouch() {
-  if (st != ST_APPROVE) return;
-  if (millis() - lastTouch < 220) return;   // debounce
-  lastTouch = millis();
-  int x = td.coords[0].x;
-  int y = td.coords[0].y;
+void answerApproval(int ok) {
+  bool typeKey = cfgKb == KB_ALWAYS || (cfgKb == KB_AUTO && !hostLinked());
+  if (typeKey) kbRaw(ok ? 'y' : 'n');
+  sendApprove(approveId, ok);
+  approveId[0] = 0;
+  afterReaction = ST_THINK;
+  applyState(ok ? ST_APPROVED : ST_REJECTED, "");
+}
+
+void doAction(UiAction a) {
+  switch (a) {
+    case ACT_NONE: return;
+    // ---- wizard ----
+    case ACT_NEXT:
+      if (ui == UI_WIZARD && wizPage < WIZ_PAGES - 1) wizPage++;
+      break;
+    case ACT_SKIP:
+      if (ui == UI_WIZARD && wizPage > 0 && wizPage < WIZ_PAGES - 1) { wizPage++; break; }
+      // "SKIP SETUP" on the welcome page: fall through to finish
+    case ACT_FINISH:
+      cfgSetupDone = true;
+      saveSettings();
+      openUi(UI_NONE);
+      afterReaction = ST_IDLE;               // celebrate, then rest
+      applyState(ST_APPROVED, "");
+      return;
+    case ACT_BACK:
+      if (ui == UI_WIZARD && wizPage > 0) wizPage--;
+      else if (ui == UI_SETTINGS) ui = UI_STATUS;
+      break;
+    case ACT_KB_TEST:
+#if !defined(USB_HID_KB)
+      if (bleKbConnected()) { bleKbType("buddy ok"); kbTest = 1; }
+      else kbTest = 2;
+#else
+      usbKeyboard.print("buddy ok"); kbTest = 1;
+#endif
+      break;
+    // ---- status / settings ----
+    case ACT_CLOSE:    openUi(UI_NONE); return;
+    case ACT_SETTINGS: ui = UI_SETTINGS; break;
+    case ACT_BRI_DN:   if (cfgBri > 0) cfgBri--; ledcWrite(BL_CH, blLevel()); saveSettings(); break;
+    case ACT_BRI_UP:   if (cfgBri < BRI_COUNT - 1) cfgBri++; ledcWrite(BL_CH, blLevel()); saveSettings(); break;
+    case ACT_SLEEP_DN: if (cfgSleep > 0) cfgSleep--; saveSettings(); break;
+    case ACT_SLEEP_UP: if (cfgSleep < SLEEP_COUNT - 1) cfgSleep++; saveSettings(); break;
+    case ACT_KB_CYCLE: cfgKb = (cfgKb + 1) % 3; saveSettings(); break;
+    case ACT_REPAIR:   ui = UI_CONFIRM; break;
+    case ACT_WIZARD:   startWizard(0); break;
+    case ACT_CONFIRM_NO:  ui = UI_SETTINGS; break;
+    case ACT_CONFIRM_YES: forgetPairing(); startWizard(1); break;
+  }
+  uiDirty = true;
+}
+
+void onTap(int x, int y) {
   {
     char dbg[40];
     snprintf(dbg, sizeof(dbg), "T|%d|%d", x, y);
     sendLine(dbg);
   }
-  if (y < 100 || y > 162) return;
-  int ok = (x < 160) ? 1 : 0;
-  kbRaw(ok ? 'y' : 'n');
-  sendApprove(approveId, ok);
-  applyState(ok ? ST_APPROVED : ST_REJECTED, "");
+  if (!screenOn) { wakeScreen(); return; }   // first tap on a dark screen only wakes it
+  wakeScreen();
+
+  if (st == ST_APPROVE) {
+    if (y < 100 || y > 162) return;
+    answerApproval(x < 160 ? 1 : 0);
+    return;
+  }
+  if (ui == UI_NONE) {
+    if (st != ST_APPROVED && st != ST_REJECTED) openUi(UI_STATUS);
+    return;
+  }
+  uiLastTouch = millis();
+  UiModel m;
+  buildModel(m);
+  doAction(uiHit(ui, m, x, y));
 }
 
 // ------------------------- setup / loop -------------------------
@@ -392,30 +667,42 @@ void setup() {
   delay(200);
   Serial.println("AgentBuddy boot");
 
+  loadSettings();
+
   if (!gfx->begin()) Serial.println("gfx FAILED");
   lcd_reg_init();
-  gfx->setRotation(3);        // landscape 320x172; Pixel Nyan case v2: USB-C on the left, head on the right
+  gfx->setRotation(1);        // landscape 320x172, flipped 180° vs. rotation 3: USB-C on the right
 
-  ledcAttach(GFX_BL, 5000, 10);
-  ledcWrite(GFX_BL, 0);          // stay dark until the first clean frame
+  BL_BEGIN();
+  ledcWrite(BL_CH, 0);          // stay dark until the first clean frame
 
   if (!canvas->begin(GFX_SKIP_OUTPUT_BEGIN)) Serial.println("canvas FAILED");
   // Wipe the panel once so uninitialised GRAM noise never shows at boot.
   canvas->fillScreen(C565(0, 0, 0));
   canvas->flush();
-  ledcWrite(GFX_BL, BL_LEVEL);
+  ledcWrite(BL_CH, blLevel());
 
   Wire.begin(TOUCH_SDA, TOUCH_SCL);
   bsp_touch_init(&Wire, TOUCH_RST, TOUCH_INT, gfx->getRotation(), gfx->width(), gfx->height());
+
+  // Unique, readable BLE name so the right board is easy to find in the list.
+  {
+    uint64_t mac = ESP.getEfuseMac();
+    snprintf(bleName, sizeof(bleName), "AgentBuddy-%02X%02X",
+             (unsigned)((mac >> 32) & 0xFF), (unsigned)((mac >> 40) & 0xFF));
+  }
 
 #if defined(USB_HID_KB)
   USB.begin();
   usbKeyboard.begin();
   Serial.println("USB HID keyboard ready");
 #else
-  bleKbBegin("AgentBuddy");
+  bleKbBegin(bleName);
   Serial.println("BLE keyboard ready");
 #endif
+
+  batBegin();
+  batPoll();
 
   sendLine("E|hello");
   Serial.println("AgentBuddy ready");
@@ -433,6 +720,7 @@ void setup() {
   }
 
   applyState(ST_IDLE, "");
+  if (!cfgSetupDone) startWizard(0);
 }
 
 String rxLine;
@@ -448,14 +736,35 @@ void loop() {
     }
   }
 
+  // Tap = first touch report after >180 ms of silence (the AXS5106L reports
+  // continuously while a finger is down), so holding a finger never repeats.
   bsp_touch_read();
   if (bsp_touch_get_coordinates(&td)) {
-    wakeScreen();
-    handleTouch();
+    bool newTap = millis() - lastTouchSeen > 180;
+    lastTouchSeen = millis();
+    if (newTap) onTap(td.coords[0].x, td.coords[0].y);
+    else lastActivity = millis();
   }
 
-  if (st == ST_IDLE && screenOn && millis() - lastActivity >= IDLE_SLEEP_MS) {
+  // Battery: sampled every 2 s, never while an approval is on screen.
+  if (st != ST_APPROVE && batPoll()) {
+    uiDirty = true;
+#if !defined(USB_HID_KB)
+    if (batPercent() >= 0) bleKbSetBattery(batPercent());
+#endif
+  }
+
+  // Screen sleep: only when resting on the idle cat.
+  uint16_t sleepS = SLEEP_OPTIONS[cfgSleep];
+  if (st == ST_IDLE && ui == UI_NONE && screenOn && sleepS &&
+      millis() - lastActivity >= sleepS * 1000UL) {
     sleepScreen();
+  }
+
+  // Status / settings close by themselves; the wizard waits for the user.
+  if ((ui == UI_STATUS || ui == UI_SETTINGS || ui == UI_CONFIRM) &&
+      millis() - uiLastTouch > UI_AUTOCLOSE_MS) {
+    openUi(UI_NONE);
   }
 
   if (st == ST_APPROVE) {
@@ -469,9 +778,24 @@ void loop() {
       canvas->flush();
       dirty = false;
     }
+  } else if (ui != UI_NONE) {
+    // Live screens (pairing / link status, blinking dots): ~4 fps is plenty.
+    if (uiDirty || millis() - uiLastDraw >= 250) {
+      uiLastDraw = millis();
+      uiDirty = false;
+      UiModel m;
+      buildModel(m);
+      uiDraw(canvas, ui, m);
+      canvas->flush();
+    }
+    // Keep reactions moving underneath so the state machine stays consistent.
+    if ((st == ST_APPROVED || st == ST_REJECTED) && millis() >= reactionUntil) {
+      applyState(afterReaction, "");
+    }
   } else {
     if ((st == ST_APPROVED || st == ST_REJECTED) && millis() >= reactionUntil) {
-      applyState(ST_THINK, "");
+      applyState(afterReaction, "");
+      if (uiResume != UI_NONE) { openUi(uiResume); uiResume = UI_NONE; }
     }
     if (millis() - lastFrame >= periodForState(st)) {
       lastFrame = millis();

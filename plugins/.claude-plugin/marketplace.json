@@ -1,0 +1,11 @@
+{
+  "name": "nyan-buddy",
+  "owner": { "name": "voldemar" },
+  "plugins": [
+    {
+      "name": "agent-buddy",
+      "source": "./claude-agent-buddy",
+      "description": "Desk-side Nyan Cat buddy (Waveshare ESP32-S3-Touch-LCD-1.47): live agent status, physical YES/NO for permission prompts, battery and pairing status."
+    }
+  ]
+}

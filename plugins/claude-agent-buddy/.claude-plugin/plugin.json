@@ -1,0 +1,7 @@
+{
+  "name": "agent-buddy",
+  "version": "1.0.0",
+  "description": "Desk-side Nyan Cat buddy on a Waveshare ESP32-S3-Touch-LCD-1.47: live Claude Code status, physical YES/NO for permission prompts, battery and Bluetooth pairing status.",
+  "author": { "name": "voldemar" },
+  "keywords": ["esp32", "hardware", "approvals", "status"]
+}

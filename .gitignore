@@ -33,3 +33,9 @@ Arduino/libraries/
 # Working frame sets (regenerated from the references)
 refwork/gen*/
 refwork/refs/
+
+# Firmware build output and logs
+Arduino/nyancat/build/
+Arduino/nyancat/build_cache/
+Arduino/nyancat/tools/build_flash.log
+Arduino/nyancat/tools/hostsim/out/
