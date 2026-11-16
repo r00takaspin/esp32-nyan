@@ -1,0 +1,108 @@
+{
+  "$schema": "https://catalog.msh.team/misc/kimi.plugin.schema.json",
+  "name": "agent-buddy",
+  "version": "0.1.0+local.20261116-221659",
+  "description": "Настольный Nyan Cat на Waveshare ESP32-S3-Touch-LCD-1.47: показ сообщений на плате, статус связи/батареи/Bluetooth, настройки яркости и сна экрана, мастер пэйринга.",
+  "keywords": [
+    "esp32",
+    "hardware",
+    "nyan cat",
+    "buddy",
+    "статус",
+    "bluetooth"
+  ],
+  "author": "voldemar",
+  "license": "MIT",
+  "skillInstructions": "",
+  "interface": {
+    "displayName": "Agent Buddy",
+    "shortDescription": "Котик-помощник на ESP32",
+    "longDescription": "Настольный Nyan Cat на Waveshare ESP32-S3-Touch-LCD-1.47: показ сообщений на плате, статус связи/батареи/Bluetooth, настройки яркости и сна экрана, мастер пэйринга.",
+    "developerName": "voldemar",
+    "websiteURL": "",
+    "iconUrl": "",
+    "category": "PRODUCTIVITY",
+    "defaultLocale": "en-US",
+    "locales": "./locales/",
+    "tryPrompts": [
+      "покажи статус моего buddy",
+      "напиши на плате «готово»",
+      "помоги спарить buddy по bluetooth"
+    ],
+    "skillOverrides": {
+      "agent-buddy": {
+        "displayName": "Agent Buddy",
+        "description": "Котик-помощник на ESP32"
+      }
+    },
+    "hostKind": "local",
+    "platforms": [
+      "macos",
+      "linux",
+      "windows"
+    ],
+    "mcpOverrides": {
+      "agent-buddy": {
+        "displayName": "Agent Buddy",
+        "description": "Котик-помощник на ESP32"
+      }
+    }
+  },
+  "skills": "./skills/",
+  "mcpServers": {
+    "agent-buddy": {
+      "command": "python3",
+      "args": [
+        "./scripts/mcp_server.py"
+      ]
+    }
+  },
+  "commands": "./commands/",
+  "hooks": [
+    {
+      "event": "SessionStart",
+      "command": "python3 ./scripts/buddy.py hook",
+      "timeout": 10
+    },
+    {
+      "event": "UserPromptSubmit",
+      "command": "python3 ./scripts/buddy.py hook",
+      "timeout": 10
+    },
+    {
+      "event": "PreToolUse",
+      "command": "python3 ./scripts/buddy.py hook",
+      "timeout": 10
+    },
+    {
+      "event": "PostToolUse",
+      "command": "python3 ./scripts/buddy.py hook",
+      "timeout": 10
+    },
+    {
+      "event": "PostToolUseFailure",
+      "command": "python3 ./scripts/buddy.py hook",
+      "timeout": 10
+    },
+    {
+      "event": "SubagentStop",
+      "command": "python3 ./scripts/buddy.py hook",
+      "timeout": 10
+    },
+    {
+      "event": "Stop",
+      "command": "python3 ./scripts/buddy.py hook",
+      "timeout": 10
+    },
+    {
+      "event": "Interrupt",
+      "command": "python3 ./scripts/buddy.py hook",
+      "timeout": 10
+    },
+    {
+      "event": "SessionEnd",
+      "command": "python3 ./scripts/buddy.py hook",
+      "timeout": 10
+    }
+  ]
+}

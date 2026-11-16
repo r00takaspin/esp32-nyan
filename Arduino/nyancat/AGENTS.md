@@ -174,6 +174,30 @@ BLE: имя теперь `AgentBuddy-XXXX` (из MAC, показывается �
 
 Плагин делит lock `/tmp/nyan-buddy-bridge.lock` с мостом DeepSeek: пока DSH держит порт, плагин платы не видит.
 
+### Плагин Kimi
+
+`plugins/kimi-agent-buddy/` — порт claude-плагина для Kimi (десктоп-клиент Kimi Work). **Эта копия —
+источник истины**: плагин зарегистрирован в personal market именно с этим путём (запись
+`~/Library/Application Support/kimi-desktop/daimon-share/daimon/plugin-market/personal/agent-buddy.json`);
+старой копии в `plugin-sources/` больше нет, правки делать здесь.
+
+Отличия от Claude-версии:
+- манифест `kimi.plugin.json` (name `agent-buddy`): MCP-сервер `python3 ./scripts/mcp_server.py`,
+  скилл `skills/agent-buddy/`, команды `commands/{status,pair,settings}.md`, хуки
+  (9 событий → `python3 ./scripts/buddy.py hook`, cwd = корень установленной копии плагина,
+  payload в stdin — Claude-совместимый snake_case: `hook_event_name`/`tool_name`/`tool_input`).
+- Живой статус работает через те же события (UserPromptSubmit/PreToolUse/Stop/…). PermissionRequest
+  в Kimi fire-and-forget — ответить с платы нельзя, хук на него **не** регистрируем.
+- `buddylib.py`: `VERSION = "1.2.0"` (старше Claude-копии 1.1.0, чтобы демон не передёргивался —
+  конфиг `~/.config/agent-buddy` и порт 8789 общие для обоих плагинов), `host_name = "kimi"`.
+
+Обновление: правим файлы здесь → `python3 …/skills/plugin-builder/scripts/cachebuster.py plugins/kimi-agent-buddy`
+(бамп версии) → при изменении манифеста ещё `bash …/scripts/register_personal.sh plugins/kimi-agent-buddy`
+→ пользователь жмёт Update на вкладке Personal. Установка: Personal → ＋.
+
+Проверено на живой плате (2026-11-16): статус по BLE, buddy_show, хуки think/tool/idle,
+sleep экрана через `buddy_settings`.
+
 ### Связь с агентом по Bluetooth и питание (после v2)
 
 - BLE-сервис связи `6E400001-B5A3-F393-E0A9-E50E24DCCA9E` (RX `…0002` write, TX `…0003` notify) — тот же
