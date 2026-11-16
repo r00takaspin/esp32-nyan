@@ -37,13 +37,13 @@ bx0, by0, bx1, by1 = info["bat_box"]; cb = info["chassis"][1]; cin = info["cover
 sx, sy, bw, bl, bh = info["switch"]; uz = info["usb_z"]
 dummies = {
   "battery 602535": boxm(bx0 + 0.25, bx1 - 0.25, by0 + 0.25, by1 - 0.25, cb + 0.05, cb + 6.05),
-  "dupont F-M on pins": boxm(-14.6, -9.4, 32.8, 35.3, 11.5, 18.4),
-  "dupont bent ~1.5 mm up": boxm(-14.6, -9.4, 34.4, 38.6, 18.4, 26.0),
-  "jumper wire bend": boxm(-14.6, -9.4, 35.0, 41.2, 26.0, 27.4),
+  "dupont F-M on pins": boxm(9.4, 14.6, 15.1, 17.6, 11.5, 18.4),       # v2.1: pins at +x, bottom edge
+  "dupont bent ~1.5 mm up": boxm(9.4, 14.6, 16.8, 19.1, 18.4, 26.0),
+  "jumper wire bend": boxm(9.4, 14.6, 17.8, 25.8, 26.0, 27.4),
   "switch body": boxm(sx - 1.75, sx + 1.75, sy - 4.3, sy + 4.3, cin - 3.6, cin - 0.02),
   "switch legs": boxm(sx - 0.4, sx + 0.4, sy - 2.6, sy + 2.6, cin - 3.6 - 3.5, cin - 3.6),
   "switch lever (travel)": boxm(sx - 0.75, sx + 0.75, sy - 2.0, sy + 2.0, cin, cin + 5.0),
-  "usb overmold 12.5x7.5": boxm(-70, -26.3, 25.2 - 6.25, 25.2 + 6.25, uz - 3.75, uz + 3.75),
+  "usb overmold 12.5x7.5": boxm(26.3, 70, 25.2 - 6.25, 25.2 + 6.25, uz - 3.75, uz + 3.75),
   "paper clip top": man(trimesh.creation.cylinder(0.5, 12, sections=16, transform=trimesh.transformations.rotation_matrix(np.pi/2, [1,0,0], [0,0,0]) @ np.eye(4))).translate([info["act"][0], info["act"][1] + 6.05, info["act"][3]]),
 }
 print("== dummies ==")

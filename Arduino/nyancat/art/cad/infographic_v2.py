@@ -1,4 +1,10 @@
-"""Renders + an assembly infographic for Pixel Nyan v2 (uses ./raster)."""
+"""Renders + an assembly infographic for Pixel Nyan v2 (uses ./raster).
+
+v2.1: the model is mirrored in x (head physically RIGHT, USB-C LEFT), and the
+renders are flopped horizontally: the raster camera is left-handed, so raw
+output was a mirror image of the physical device. Labels use the same flop in
+proj() so they land on the right spots.
+"""
 import glob, os, subprocess, numpy as np
 from PIL import Image, ImageDraw, ImageFont
 
@@ -41,11 +47,11 @@ def cam(yaw, el, dist, tgt, W):
 
 def render(sc, out, yaw, el, dist, tgt, W=1600, H=1100):
     subprocess.run(["./raster", sc, str(W), str(H), str(yaw), str(el), str(dist), *map(str, tgt), "/tmp/r.ppm"], check=True)
-    subprocess.run(["magick", "/tmp/r.ppm", "-resize", "50%", out], check=True)
+    subprocess.run(["magick", "/tmp/r.ppm", "-resize", "50%", "-flop", out], check=True)   # v2.1: un-mirror
     c, fw, rt, up, foc = cam(yaw, el, dist, tgt, W)
     def proj(p):
         q = np.array(p, float) - c; z = q @ fw
-        return ((W / 2 + foc * (q @ rt) / z) / 2, (H / 2 - foc * (q @ up) / z) / 2)
+        return ((W / 2 - foc * (q @ rt) / z) / 2, (H / 2 - foc * (q @ up) / z) / 2)        # v2.1: flopped x
     return proj
 
 FONT = "/System/Library/Fonts/Supplemental/Arial.ttf"; FB = "/System/Library/Fonts/Supplemental/Arial Bold.ttf"
@@ -75,12 +81,12 @@ scene("/tmp/b.txt", ALL, ("switch_lever", "screws_cover"))
 P = render("/tmp/b.txt", f"{V}/hero_back.png", 152, 20, 255, (0, 22, 12)); shots["back"] = P
 # exploded
 EX = {"chassis": (0, 0, 26), "cover": (0, 0, 56), "battery": (0, 0, 44), "screws_cover": (0, 0, 70),
-      "rainbowA": (-28, 0, 0), "rainbowB": (-18, 0, 0), "tail": (-18, 0, -22), "board": (0, 0, 13)}
+      "rainbowA": (28, 0, 0), "rainbowB": (18, 0, 0), "tail": (18, 0, -22), "board": (0, 0, 13)}
 scene("/tmp/e.txt", ALL, ("screen", "battery", "switch", "switch_lever", "screws_chassis", "dupont", "screws_cover"), off=EX, tint=True)
 shots["exploded"] = render("/tmp/e.txt", f"{V}/exploded.png", -38, 22, 400, (-6, 22, 26))
 # step 1: connectors on VBAT/GND (module from the back)
 scene("/tmp/s1.txt", [], ("dupont",))
-shots["s1"] = render("/tmp/s1.txt", f"{V}/step1.png", 160, 25, 150, (-6, 27, 12))
+shots["s1"] = render("/tmp/s1.txt", f"{V}/step1.png", 120, 30, 150, (-6, 24, 15))
 # step 2: chassis onto the standoffs
 scene("/tmp/s2.txt", ["chassis"], ("dupont", "screws_chassis"), off={"chassis": (0, 0, 9)}, tint=True)
 shots["s2"] = render("/tmp/s2.txt", f"{V}/step2.png", 150, 25, 170, (-6, 25, 16))
@@ -94,7 +100,7 @@ shots["s4"] = render("/tmp/s4.txt", f"{V}/step4.png", -10, 55, 150, (-6, 25, 26)
 scene("/tmp/s5.txt", ["body", "cover"], ("switch_lever", "screws_cover"), off={"screws_cover": (0, 0, 10)}, tint=True)
 shots["s5"] = render("/tmp/s5.txt", f"{V}/step5.png", 160, 22, 250, (4, 22, 20))
 # step 6: rainbow + tail
-scene("/tmp/s6.txt", ["body", "rainbowA", "rainbowB", "tail"], ("screen",), off={"rainbowA": (-22, 0, 0), "rainbowB": (-14, 0, 0), "tail": (-14, 0, -20)})
+scene("/tmp/s6.txt", ["body", "rainbowA", "rainbowB", "tail"], ("screen",), off={"rainbowA": (22, 0, 0), "rainbowB": (14, 0, 0), "tail": (14, 0, -20)})
 shots["s6"] = render("/tmp/s6.txt", f"{V}/step6.png", -40, 15, 260, (-14, 22, 10))
 
 # ---------------------------------------------------------------- sheet 1: sketch
@@ -105,16 +111,16 @@ d.text((44, 108), "корпус + лицо + голова + лапки — од�
 a = Image.open(f"{V}/hero_front.png"); b = Image.open(f"{V}/hero_back.png")
 im.paste(a, (20, 170)); im.paste(b.resize((640, 440)), (W - 680, 170))
 P = shots["front"]
-label(im, lambda p: (P(p)[0] + 20, P(p)[1] + 170), (-2.35, 14.0, 0.0), "окно по центру экрана (исправлено)", (60, 230))
-label(im, lambda p: (P(p)[0] + 20, P(p)[1] + 170), (40.0, 30.0, -3.0), "голова — часть корпуса", (60, -110))
-label(im, lambda p: (P(p)[0] + 20, P(p)[1] + 170), (-46.0, 43.0, 6.0), "верх радуги = верх корпуса", (-30, -60))
-label(im, lambda p: (P(p)[0] + 20, P(p)[1] + 170), (-51.6, 25.2, 9.7), "USB-C через радугу", (-40, 70))
-label(im, lambda p: (P(p)[0] + 20, P(p)[1] + 170), (-18.1, 43.2, 10.6), "Ø1.5 под скрепку (RST/BOOT)", (30, -95))
+label(im, lambda p: (P(p)[0] + 20, P(p)[1] + 170), (2.35, 14.0, 0.0), "окно по центру экрана (исправлено)", (-60, 230))
+label(im, lambda p: (P(p)[0] + 20, P(p)[1] + 170), (-40.0, 30.0, -3.0), "голова — часть корпуса", (-60, -110))
+label(im, lambda p: (P(p)[0] + 20, P(p)[1] + 170), (46.0, 43.0, 6.0), "верх радуги = верх корпуса", (30, -60))
+label(im, lambda p: (P(p)[0] + 20, P(p)[1] + 170), (51.6, 25.2, 9.7), "USB-C через радугу", (40, 70))
+label(im, lambda p: (P(p)[0] + 20, P(p)[1] + 170), (18.1, 43.2, 10.6), "Ø1.5 под скрепку (RST/BOOT)", (-30, -95))
 Pb = shots["back"]
 sc_ = 640 / 800
 pb = lambda p: (Pb(p)[0] * sc_ + W - 680, Pb(p)[1] * sc_ + 170)
-label(im, pb, (15.4, 25.2, 32.0), "тумблер SS12D00G5", (-60, 80), 20)
-label(im, pb, (17.3, 39.9, 29.6), "3 × M2×8", (40, -50), 20)
+label(im, pb, (-15.4, 25.2, 32.0), "тумблер SS12D00G5", (60, 80), 20)
+label(im, pb, (-17.3, 39.9, 29.6), "3 × M2×8", (-40, -50), 20)
 y = 650
 d.text((W - 680, y), "Что изменилось", font=f(36, True), fill=(30, 30, 34)); y += 56
 for t in ["1  Голова справа, USB слева (setRotation(3))",
@@ -135,8 +141,8 @@ W, H = 2400, 2050
 im = Image.new("RGB", (W, H), (246, 245, 242)); d = ImageDraw.Draw(im)
 d.text((40, 28), "Сборка Pixel Nyan v2", font=f(64, True), fill=(30, 30, 34))
 d.text((44, 108), "6 шагов · клей нужен только для радуги и хвоста", font=f(32), fill=(110, 108, 104))
-steps = [("s1", "Провода «мама-папа» на VBAT и GND", ["первые 2 штыря верхнего ряда у USB-C",
-                                         "конец «мамы» слегка отогнуть вверх (~1.5 мм)", "«+» батареи → тумблер → VBAT, «−» → GND"]),
+steps = [("s1", "Провода «мама-папа» на VBAT и GND", ["первые 2 штыря у USB-C (на фото — нижний ряд)",
+                                         "конец «мамы» слегка отогнуть вверх, к батарее (~1.5 мм)", "«+» батареи → тумблер → VBAT, «−» → GND"]),
          ("s2", "Шасси на плату", ["4 × M2×10 в латунные стойки", "головки утапливаются в шасси", "провода — в окно шасси"]),
          ("s3", "Модуль в корпус сзади", ["экраном вперёд, USB-C влево", "сам встаёт в карман с фаской", "до упора стеклом в окно"]),
          ("s4", "Батарея и тумблер в крышку", ["602535 в карман вплотную к нижней стенке", "тумблер защёлкнуть рычажком наружу",
@@ -157,8 +163,8 @@ for i, (key, title, lines) in enumerate(steps):
 def sp(i, P, p):
     x = 40 + (i % 3) * (cw + 20); y0 = 180 + (i // 3) * (chh + 400); s = cw / 800
     return (P(p)[0] * s + x, P(p)[1] * s + y0)
-label(im, lambda p: sp(0, shots["s1"], p), (-12.0, 40.0, 20.0), "VBAT / GND", (40, -40), 22)
-arrow(im, sp(2, shots["s3"], (-3.6, 25.2, 62.0)), sp(2, shots["s3"], (-3.6, 25.2, 36.0)))
+label(im, lambda p: sp(0, shots["s1"], p), (12.0, 17.6, 20.0), "VBAT / GND", (40, -40), 22)
+arrow(im, sp(2, shots["s3"], (3.6, 25.2, 62.0)), sp(2, shots["s3"], (3.6, 25.2, 36.0)))
 arrow(im, sp(4, shots["s5"], (0.0, 30.0, 48.0)), sp(4, shots["s5"], (0.0, 30.0, 33.0)))
 d.rounded_rectangle([40, H - 190, W - 40, H - 40], 18, fill=(255, 255, 255))
 d.text((70, H - 170), "Покупное:", font=f(30, True), fill=(30, 30, 34))

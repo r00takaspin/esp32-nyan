@@ -9,8 +9,15 @@ Changes vs v1 (after the first print):
   * snap-in holder for the SS12D00G5 slide switch on the back cover;
   * rainbow flush with the top of the body and as deep as the body.
 
-Device coordinates (mm): x right, y up (desk at y=0), z backwards (front faces -z).
-Pixel grid: cell (c, r) spans x in [(c-21.5)S, (c-20.5)S], y in [(17-r)S, (18-r)S].
+v2.1 (mirror fix): the old coordinate convention ("x right, y up, front faces -z") is
+LEFT-handed, so the printed case came out mirrored: head physically on the LEFT, USB-C
+on the RIGHT. The model is now mirrored in x (and the board placement rotated 180 deg
+in plane to match) so the physical print matches the docs: head RIGHT, USB-C LEFT.
+Note: +x still points to the viewer's LEFT in the physical front view; the pixel grid
+is unchanged, only cell() maps it to the other side.
+
+Device coordinates (mm): x = -right (sic, see above), y up (desk at y=0), z backwards (front faces -z).
+Pixel grid: cell (c, r) spans x in [(20.5-c)S, (21.5-c)S], y in [(17-r)S, (18-r)S].
 """
 import json, os, sys
 import cadquery as cq
@@ -23,15 +30,15 @@ os.makedirs(OUT, exist_ok=True)
 
 S = 2.4
 def cell(c, r):
-    return box((c - 21.5) * S, (17 - r) * S, (c - 20.5) * S, (18 - r) * S)
+    return box((20.5 - c) * S, (17 - r) * S, (21.5 - c) * S, (18 - r) * S)
 
 # ---------------------------------------------------------------- board (from the Waveshare STEP)
-XM, YM = -3.6, 25.2           # module centre
+XM, YM = 3.6, 25.2            # module centre (mirrored in v2.1)
 GAP = 0.3                     # glass-to-lip gap
 FP_BACK = 2.0                 # back plane of the front wall (lip)
 ZG = FP_BACK + GAP            # glass front
 def bz(zb): return ZG + 3.26 - zb
-def bxy(xb, yb): return XM + yb, YM + xb
+def bxy(xb, yb): return XM - yb, YM - xb    # board rotated 180 deg in plane vs v2.0
 STANDOFF_END = bz(-7.39)
 PIN_TIP = bz(-12.35)
 USB_Z = 0.5 * (bz(-2.44) + bz(-6.60))
@@ -41,7 +48,7 @@ _, ACT_YBOT = bxy(-11.56, -14.5)
 HOLES = [bxy(sx * 8.5, sy * 19.5) for sx in (-1, 1) for sy in (-1, 1)]
 VBAT_PIN = bxy(8.87, -9.65)
 GND_PIN = bxy(8.87, -7.11)
-ACTIVE_CX = XM - 44.5 / 2 + 7.03 + 32.93 / 2     # USB end margin 7.03, far end 4.54 (v1 had the sign wrong)
+ACTIVE_CX = XM + 44.5 / 2 - 7.03 - 32.93 / 2     # USB end margin 7.03, far end 4.54 (USB end now at +x)
 MOD_W, MOD_H, MOD_R = 44.5, 24.55, 5.75
 
 # ---------------------------------------------------------------- pixel art
@@ -156,20 +163,20 @@ TUN_W, TUN_D, TUN_R = 13.6, 8.6, 1.2
 POCKET_CLR = 0.25              # module-to-pocket clearance per side
 CHAMFER = 7.0                  # depth of the 45 deg self-centring pocket
 BAT_L, BAT_W, BAT_T = 35.5, 25.5, 6.4      # 602535 (6 x 25 x 35) + clearance
-BAT_CX, BAT_Y0 = -6.3, 9.0             # sits on the bottom wall (no bottom rail)
+BAT_CX, BAT_Y0 = 6.3, 9.0             # sits on the bottom wall (no bottom rail)
 bat_box = box(BAT_CX - BAT_L / 2, BAT_Y0, BAT_CX + BAT_L / 2, BAT_Y0 + BAT_W)
-SW_X, SW_Y = 15.4, YM          # SS12D00G5 on the cover
+SW_X, SW_Y = -15.4, YM          # SS12D00G5 on the cover
 SW_BODY = (3.7, 8.7, 3.7)      # x, y, z of the switch body pocket (switch ~3.5 x 8.6 x 3.6)
-WIRE_WIN = box(-20.0, 28.5, -3.5, 60)       # chassis window for Dupont F-M jumpers on VBAT/GND
+WIRE_WIN = box(3.5, 2 * YM - 60.0, 20.0, 2 * YM - 28.5)       # chassis window for Dupont F-M jumpers on VBAT/GND (board rotated in v2.1: pins now on the bottom edge)
 
-cavity = S_pop.buffer(-WALL, join_style=2).intersection(box(-60, 0, CAV_XMAX, 60))
+cavity = S_pop.buffer(-WALL, join_style=2).intersection(box(-CAV_XMAX, 0, 60, 60))
 
 # pillars for the cover screws (same logic as v1)
 PIL_R = 2.4
 def pillar_ok(x, y, r, skin):
     return S_shell.buffer(-skin, join_style=2).contains(Point(x, y).buffer(r))
-cands = {"tr": [(15.0 + 0.1 * i, 37.0 + 0.1 * j) for i in range(30) for j in range(30)],
-         "br": [(13.5 + 0.1 * i, 10.0 + 0.1 * j) for i in range(30) for j in range(30)]}
+cands = {"tr": [(-17.9 + 0.1 * i, 37.0 + 0.1 * j) for i in range(30) for j in range(30)],
+         "br": [(-16.4 + 0.1 * i, 10.0 + 0.1 * j) for i in range(30) for j in range(30)]}
 pillars = {}
 for k, cs in cands.items():
     best = None
@@ -181,7 +188,7 @@ for k, cs in cands.items():
         if best is None or score < best[0]: best = (score, x, y)
     if best is None: sys.exit(f"no pillar position for {k}")
     pillars[k] = (round(best[1], 2), round(best[2], 2))
-pillars["lm"] = (-29.3, YM)
+pillars["lm"] = (29.3, YM)
 print("pillars", pillars)
 
 parts = {}
@@ -219,7 +226,7 @@ cav_solid = fuse(prism(cavity, FP_BACK + CHAMFER - 0.01, BACK + 0.1),
                  pocket.intersect(prism(cavity, FP_BACK, FP_BACK + CHAMFER)))
 tun = rrect(YM, USB_Z, TUN_W, TUN_D, TUN_R)
 tun_yz = list(tun.exterior.coords)[:-1]
-tunnel = yz_prism(tun_yz, -34.0, XM - MOD_W / 2 - 0.1)
+tunnel = yz_prism(tun_yz, XM + MOD_W / 2 + 0.1, 34.0)
 clips = fuse(ycyl(ACT_X, ACT_Z, 0.75, ACT_YTOP + 1.0, S * 18 + 0.5),
              ycyl(ACT_X, ACT_Z, 0.75, S * 3 - 0.5, ACT_YBOT - 1.0))
 cutters = fuse(win, cav_solid, tunnel, clips)
@@ -229,7 +236,7 @@ pil = []
 for k, (x, y) in pillars.items():
     p = cyl(x, y, PIL_R, FP_BACK, COVER_IN)
     if k == "lm":
-        pts = [(x - 5, 0), (x - 5, 14.4 - 3.7), (x + 10, 14.4 + 11.3), (x + 10, 0)]
+        pts = [(x + 5, 0), (x + 5, 14.4 - 3.7), (x - 10, 14.4 + 11.3), (x - 10, 0)]
         w = cq.Wire.makePolygon([cq.Vector(a, y - 5, b) for a, b in pts], close=True)
         p = p.cut(cq.Solid.extrudeLinear(cq.Face.makeFromWires(w), cq.Vector(0, 10, 0)))
     if k == "br":
@@ -262,11 +269,11 @@ parts["chassis"] = {"black": chassis.clean()}
 cov_outline = cavity.buffer(-0.2, join_style=2)
 cover = prism(cov_outline, COVER_IN, BACK)
 bx0, by0, bx1, by1 = bat_box.bounds
-feat = unary_union([box(-3.0, by1, bx1 - 4, by1 + 1.0),          # top rail only right of the jumpers
+feat = unary_union([box(bx0 + 4, by1, 3.0, by1 + 1.0),          # top rail only left of the jumpers
                     box(bx0 - 1.0, by0 + 6, bx0, by1 - 6), box(bx1, by0 + 6, bx1 + 1.0, by1 - 6)])
 feat = feat.intersection(cavity.buffer(-0.3, join_style=2))
 cover = cover.fuse(prism(feat, COVER_IN - 3.0, COVER_IN + 0.01))
-posts = [(-27.4, YM - 7.0), (-27.4, YM + 7.0), (SW_X, YM - 8.6), (SW_X, YM + 8.6)]
+posts = [(27.4, YM - 7.0), (27.4, YM + 7.0), (SW_X, YM - 8.6), (SW_X, YM + 8.6)]
 for (x, y) in posts:
     cover = cover.fuse(cyl(x, y, 1.6, CH_BACK, COVER_IN + 0.01))
 # snap-in holder: pocket walls + two lips that click over the switch body
@@ -300,7 +307,7 @@ parts["tail"] = tv
 
 # ---------------------------------------------------------------- rainbow: two halves, one colour per stripe
 rb_cols = ["red", "orange", "yellow", "green", "blue", "violet"]
-tunnel_rb = yz_prism(tun_yz, -53.0, -32.3)
+tunnel_rb = yz_prism(tun_yz, 32.3, 53.0)
 for seg, cols in (("rainbowA", range(0, 4)), ("rainbowB", range(4, 8))):
     v = {}
     for k in range(6):
