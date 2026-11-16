@@ -1,0 +1,23 @@
+{
+  "displayName": "Agent Buddy",
+  "shortDescription": "ESP32 桌面猫咪助手",
+  "longDescription": "Waveshare ESP32-S3-Touch-LCD-1.47 上的桌面 Nyan Cat：在设备上显示消息，查看连接/电量/蓝牙状态，调整亮度与屏幕休眠，蓝牙配对向导。",
+  "developerName": "voldemar",
+  "tryPrompts": [
+    "显示我的 buddy 状态",
+    "在设备上显示“完成了”",
+    "帮我通过蓝牙配对 buddy"
+  ],
+  "mcpOverrides": {
+    "agent-buddy": {
+      "displayName": "Agent Buddy",
+      "description": "ESP32 桌面猫咪助手"
+    }
+  },
+  "skillOverrides": {
+    "agent-buddy": {
+      "displayName": "Agent Buddy",
+      "description": "ESP32 桌面猫咪助手"
+    }
+  }
+}
