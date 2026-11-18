@@ -13,31 +13,48 @@
 
 ---
 
-## Установка плагинов (одна команда)
+## Установка плагинов (без скачивания репозитория)
 
-Плагин работает с **прошитой платой** (см. [шаг 2](#5-шаг-2-сборка-и-прошивка)),
+Плагины ставятся одной командой прямо с GitHub в каждый харнес — репозиторий клонировать
+**не нужно**. Плагин работает с **прошитой платой** (см. [шаг 2](#5-шаг-2-сборка-и-прошивка)),
 подключённой кабелем или сопряжённой по Bluetooth ([шаг 3](#6-шаг-3-первое-включение-и-bluetooth)).
 
-Из корня репозитория:
+**Claude Code** — в терминале:
 
 ```bash
-bash install_plugins.command
+claude plugin marketplace add r00takaspin/esp32-nyan && claude plugin install agent-buddy@nyan-buddy -y
 ```
 
-Скрипт сам находит установленные харнесы и ставит плагины во все: **Claude Code**,
-**DeepSeek Harness** и **Kimi Work**. Его же можно запустить двойным кликом в Finder.
-Повторный запуск безопасен: уже установленные плагины просто обновятся.
+(или из сессии Claude Code: `/plugin marketplace add r00takaspin/esp32-nyan`, затем
+`/plugin install agent-buddy@nyan-buddy`). Если сессия была открыта — `/reload-plugins`.
 
-После установки остаются мелочи в самих харнесах:
+**DeepSeek Harness** — в терминале:
 
-- **DeepSeek Harness**: в окне **Плагины** → **Agent Buddy (ESP32 display)** → включить переключатель;
-- **Kimi Work**: если плагин ещё не был установлен — вкладка **Personal** → **＋** (один раз;
-  дальше обновления подхватываются сами);
-- **Claude Code**: если сессия была открыта — `/reload-plugins` или перезапуск.
+```bash
+dsh plugin --profile desktop add "github:r00takaspin/esp32-nyan#plugin-dsh-agent-buddy"
+```
+
+Затем в окне DeepSeek Harness: **Плагины** → **Agent Buddy (ESP32 display)** → включить
+переключатель. Для USB нужен `pyserial`: `python3 -m pip install pyserial`.
+
+**Kimi Work (десктоп)** — в терминале:
+
+```bash
+KIMI_WORK_NETWORK_PROXY=off "/Applications/Kimi.app/Contents/Resources/resources/daimon-bundle/bin/kimi-daimon" \
+  kimi-plugin install "https://github.com/r00takaspin/esp32-nyan/archive/refs/heads/plugin-kimi-agent-buddy.zip" \
+  --share-dir "$HOME/Library/Application Support/kimi-desktop/daimon-share"
+```
+
+Если Kimi Work был запущен — перезапустите его.
 
 Проверка: `/agent-buddy:status` (Claude), `curl 127.0.0.1:8788/status` (DeepSeek),
-«покажи статус моего buddy» (Kimi). Подробности и ручные команды — в разделах
+«покажи статус моего buddy» (Kimi). Подробности — в разделах
 [7](#7-плагин-для-claude-code), [8](#8-плагин-для-deepseek-harness), [9](#9-плагин-для-kimi-work).
+
+> У вас **склонирован репозиторий** (например, вы собираете прошивку)? Тогда проще поставить
+> всё из локальной копии одним скриптом: `bash install_plugins.command` — он сам находит
+> установленные харнесы. А `bash publish_plugins.command` обновляет плагины на GitHub
+> после ваших правок.
 
 > ⚠️ Платой в каждый момент управляет **один** агент — кто подключился первым
 > (общий lock `/tmp/nyan-buddy-bridge.lock`). Как передать плату другому агенту — см.
@@ -344,7 +361,7 @@ SELFTEST_OK
 ### 2/3 AGENT LINK: связь с агентом
 
 Шаг ждёт, пока с платой заговорит плагин агента: строка `Agent: waiting for the plugin...`.
-Установите плагин ([одна команда](#установка-плагинов-одна-команда) вверху), он подключится
+Установите плагин ([одна команда](#установка-плагинов-без-скачивания-репозитория) вверху), он подключится
 сам, и строка станет зелёной: `Agent: claude linked` (или `kimi linked`). Можно нажать
 **SKIP** и вернуться позже: котик → SETTINGS → SETUP.
 
@@ -357,7 +374,7 @@ SELFTEST_OK
 
 ## 7. Плагин для Claude Code
 
-Установка — в [быстром старте](#установка-плагинов-одна-команда) вверху. Отдельно ставить
+Установка — в [быстром старте](#установка-плагинов-без-скачивания-репозитория) вверху. Отдельно ставить
 ничего не нужно: Python берётся системный, `pyserial` не требуется.
 
 ### 7.1. Разрешение на Bluetooth
@@ -442,7 +459,7 @@ python3 plugins/claude-agent-buddy/scripts/buddy.py stop              # оста
 
 ## 8. Плагин для DeepSeek Harness
 
-Установка — в [быстром старте](#установка-плагинов-одна-команда) вверху. Если плагин не
+Установка — в [быстром старте](#установка-плагинов-без-скачивания-репозитория) вверху. Если плагин не
 появился в списке, проверьте, что `dsh plugin add` прошёл без ошибок, и нажмите
 **«Обновить»**.
 
@@ -490,9 +507,10 @@ python3 plugins/claude-agent-buddy/scripts/buddy.py stop
 ## 9. Плагин для Kimi Work
 
 Плагин `plugins/kimi-agent-buddy/` — порт Claude-версии для десктоп-клиента Kimi Work.
-Установка: вкладка **Personal** → **＋** → выбрать папку `plugins/kimi-agent-buddy`.
-Эта копия — источник истины: плагин зарегистрирован в personal market именно с этим путём,
-правки делаются здесь.
+Установка одной командой — в [быстром старте](#установка-плагинов-без-скачивания-репозитория)
+вверху. Локальная установка из клона репозитория (для разработки): вкладка **Personal** →
+**＋** → выбрать папку `plugins/kimi-agent-buddy`; эта копия — источник истины, правки
+делаются в ней, а на GitHub публикуются скриптом `publish_plugins.command`.
 
 Отличия от Claude-версии:
 
