@@ -132,10 +132,12 @@ ok("chassis cleared for switch legs",
    not chassis.contains(np.array([[SW_X, SW_Y, (CH_FRONT + CH_BACK) / 2]]))[0])
 
 act_cx = info["active_cx"]
-wx0, wx1 = act_cx - 19.0, act_cx + 19.0; wy0, wy1 = YM - 10.3, YM + 10.3
+wx0, wx1 = act_cx - 19.0 + 3.5, act_cx + 19.0; wy0, wy1 = YM - 10.3, YM + 10.3   # v2.2 edges
 ax0, ax1 = act_cx - 32.93 / 2, act_cx + 32.93 / 2; ay0, ay1 = YM - 8.85, YM + 8.85
-m = min(ax0 - wx0, wx1 - ax1, ay0 - wy0, wy1 - ay1)
-ok("screen window covers active area with margin", m >= 1.0, f"min margin {m:.2f} mm")
+ml, mr = wx1 - ax1, ax0 - wx0
+ok("screen window margins (left >= 1 mm; right trims 0.97 mm of active by design v2.2)",
+   ml >= 1.0 and mr >= -1.0 and min(ay0 - wy0, wy1 - ay1) >= 1.0,
+   f"left {ml:.2f} mm, right {mr:.2f} mm, top/bot {min(ay0-wy0, wy1-ay1):.2f} mm")
 
 print()
 if fails: print("FAILURES:", *fails, sep="\n  - "); sys.exit(1)

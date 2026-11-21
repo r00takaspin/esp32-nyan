@@ -158,7 +158,12 @@ CH_FRONT = PIN_TIP + 0.6
 CH_T = 2.6
 CH_BACK = CH_FRONT + CH_T
 CAV_XMAX = 19.0
-WIN_W, WIN_H, WIN_R = 38.0, 20.6, 2.5
+# v2.2: window edges are explicit. Physical right = model -x: the printed case showed
+# dead glass (black void) on that side, so the model-x_min edge moves in by 3.5 mm.
+WIN_X0 = ACTIVE_CX - 19.0 + 3.5
+WIN_X1 = ACTIVE_CX + 19.0
+WIN_CX = 0.5 * (WIN_X0 + WIN_X1)
+WIN_W, WIN_H, WIN_R = WIN_X1 - WIN_X0, 20.6, 2.5
 TUN_W, TUN_D, TUN_R = 13.6, 8.6, 1.2
 POCKET_CLR = 0.25              # module-to-pocket clearance per side
 CHAMFER = 7.0                  # depth of the 45 deg self-centring pocket
@@ -216,8 +221,8 @@ vol["black"] = fuse(*black)
 
 # cutters: window, cavity with the 45 deg self-centring pocket, USB tunnel, paper-clip holes
 WZ = 0.4
-win = fuse(prism(rrect(ACTIVE_CX, YM, WIN_W, WIN_H, WIN_R), WZ - 0.01, FP_BACK + 0.1),
-           loft_rrect(ACTIVE_CX, YM, WIN_W, WIN_H, WIN_R, WZ,
+win = fuse(prism(rrect(WIN_CX, YM, WIN_W, WIN_H, WIN_R), WZ - 0.01, FP_BACK + 0.1),
+           loft_rrect(WIN_CX, YM, WIN_W, WIN_H, WIN_R, WZ,
                       WIN_W + 6.0, WIN_H + 6.0, WIN_R + 3.0, WZ - 3.0))
 pw, ph, pr = MOD_W + 2 * POCKET_CLR, MOD_H + 2 * POCKET_CLR, MOD_R + POCKET_CLR
 pocket = loft_rrect(XM, YM, pw, ph, pr, FP_BACK,
